@@ -1,0 +1,27 @@
+[package]
+name = "matmul"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "matmul"
+path = "src/main.rs"
+
+[lib]
+name = "matmul"
+path = "src/lib.rs"
+
+[dependencies]
+rand = "0.8"
+nalgebra = "0.32"
+
+[dev-dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+lto = true
+codegen-units = 1
