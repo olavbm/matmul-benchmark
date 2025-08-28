@@ -152,6 +152,26 @@ impl Matrix {
     pub fn is_col_major(&self) -> bool {
         matches!(self.state, MatrixState::ColMajor(_))
     }
+    
+    /// Extract a row as a vector
+    pub fn get_row(&self, row: usize) -> Vec<f64> {
+        assert!(row < self.rows, "Row index out of bounds");
+        let mut result = Vec::with_capacity(self.cols);
+        for col in 0..self.cols {
+            result.push(self.get(row, col));
+        }
+        result
+    }
+    
+    /// Extract a column as a vector
+    pub fn get_col(&self, col: usize) -> Vec<f64> {
+        assert!(col < self.cols, "Column index out of bounds");
+        let mut result = Vec::with_capacity(self.rows);
+        for row in 0..self.rows {
+            result.push(self.get(row, col));
+        }
+        result
+    }
 }
 
 #[cfg(test)]
@@ -239,5 +259,46 @@ mod tests {
     fn test_from_data_wrong_size() {
         let data = vec![1.0, 2.0, 3.0]; // 3 elements
         Matrix::from_data_row_major(data, 2, 2); // But claiming 2x2 = 4 elements
+    }
+
+    #[test]
+    fn test_get_row() {
+        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // [[1,2,3], [4,5,6]]
+        let matrix = Matrix::from_data_row_major(data, 2, 3);
+        
+        let row0 = matrix.get_row(0);
+        assert_eq!(row0, vec![1.0, 2.0, 3.0]);
+        
+        let row1 = matrix.get_row(1);
+        assert_eq!(row1, vec![4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn test_get_col() {
+        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]; // [[1,2,3], [4,5,6]]
+        let matrix = Matrix::from_data_row_major(data, 2, 3);
+        
+        let col0 = matrix.get_col(0);
+        assert_eq!(col0, vec![1.0, 4.0]);
+        
+        let col1 = matrix.get_col(1);
+        assert_eq!(col1, vec![2.0, 5.0]);
+        
+        let col2 = matrix.get_col(2);
+        assert_eq!(col2, vec![3.0, 6.0]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_get_row_out_of_bounds() {
+        let matrix = Matrix::new(2, 3);
+        matrix.get_row(2); // Should panic
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_get_col_out_of_bounds() {
+        let matrix = Matrix::new(2, 3);
+        matrix.get_col(3); // Should panic
     }
 }
