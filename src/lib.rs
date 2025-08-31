@@ -9,7 +9,17 @@ pub mod dotprod;
 pub use matrix::Matrix;
 pub use test_data::*;
 pub use benchmark::*;
-pub use implementations::{naive_matmul, dotprod_matmul, dotprod_matmul_fast, dotprod_matmul_col_major_fast};
+pub use implementations::{
+    naive_matmul, 
+    dotprod_matmul, 
+    dotprod_matmul_fast, 
+    dotprod_matmul_col_major_fast,
+    blocked_matmul,
+    blocked_matmul_default,
+    blocked_matmul_with_dotprod,
+    blocked_matmul_col_major_fast,
+    blocked_matmul_optimized
+};
 pub use dotprod::{naive_dotprod, unrolled_dotprod};
 
 #[cfg(test)]
@@ -292,6 +302,136 @@ mod benches {
         let mat_b = Matrix::random(128, 128);
         b.iter(|| {
             test::black_box(dotprod_matmul_col_major_fast(&a, &mat_b, naive_dotprod))
+        });
+    }
+
+    // Blocked matrix multiplication benchmarks
+    
+    #[bench]
+    fn bench_blocked_matmul_64x64_block32(b: &mut Bencher) {
+        let a = Matrix::random(64, 64);
+        let mat_b = Matrix::random(64, 64);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 32))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_64x64_block64(b: &mut Bencher) {
+        let a = Matrix::random(64, 64);
+        let mat_b = Matrix::random(64, 64);
+        b.iter(|| {
+            test::black_box(blocked_matmul_default(&a, &mat_b))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_128x128_block32(b: &mut Bencher) {
+        let a = Matrix::random(128, 128);
+        let mat_b = Matrix::random(128, 128);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 32))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_128x128_block64(b: &mut Bencher) {
+        let a = Matrix::random(128, 128);
+        let mat_b = Matrix::random(128, 128);
+        b.iter(|| {
+            test::black_box(blocked_matmul_default(&a, &mat_b))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_128x128_block128(b: &mut Bencher) {
+        let a = Matrix::random(128, 128);
+        let mat_b = Matrix::random(128, 128);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 128))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_256x256_block32(b: &mut Bencher) {
+        let a = Matrix::random(256, 256);
+        let mat_b = Matrix::random(256, 256);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 32))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_256x256_block64(b: &mut Bencher) {
+        let a = Matrix::random(256, 256);
+        let mat_b = Matrix::random(256, 256);
+        b.iter(|| {
+            test::black_box(blocked_matmul_default(&a, &mat_b))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_256x256_block128(b: &mut Bencher) {
+        let a = Matrix::random(256, 256);
+        let mat_b = Matrix::random(256, 256);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 128))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_512x512_block32(b: &mut Bencher) {
+        let a = Matrix::random(512, 512);
+        let mat_b = Matrix::random(512, 512);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 32))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_512x512_block64(b: &mut Bencher) {
+        let a = Matrix::random(512, 512);
+        let mat_b = Matrix::random(512, 512);
+        b.iter(|| {
+            test::black_box(blocked_matmul_default(&a, &mat_b))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_matmul_512x512_block128(b: &mut Bencher) {
+        let a = Matrix::random(512, 512);
+        let mat_b = Matrix::random(512, 512);
+        b.iter(|| {
+            test::black_box(blocked_matmul(&a, &mat_b, 128))
+        });
+    }
+
+    // Blocked with optimizations benchmarks
+
+    #[bench]
+    fn bench_blocked_optimized_128x128(b: &mut Bencher) {
+        let a = Matrix::random(128, 128);
+        let mat_b = Matrix::random(128, 128);
+        b.iter(|| {
+            test::black_box(blocked_matmul_optimized(&a, &mat_b, unrolled_dotprod))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_optimized_256x256(b: &mut Bencher) {
+        let a = Matrix::random(256, 256);
+        let mat_b = Matrix::random(256, 256);
+        b.iter(|| {
+            test::black_box(blocked_matmul_optimized(&a, &mat_b, unrolled_dotprod))
+        });
+    }
+
+    #[bench]
+    fn bench_blocked_optimized_512x512(b: &mut Bencher) {
+        let a = Matrix::random(512, 512);
+        let mat_b = Matrix::random(512, 512);
+        b.iter(|| {
+            test::black_box(blocked_matmul_optimized(&a, &mat_b, unrolled_dotprod))
         });
     }
 }
