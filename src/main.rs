@@ -1,7 +1,21 @@
-use matmul::{Matrix, naive_matmul, generate_test_matrices};
+use matmul::{Matrix, naive_matmul, generate_test_matrices, dotprod_matmul_col_major_fast, unrolled_dotprod, 
+            blocked_matmul_default, blocked_matmul_optimized, blocked_matmul};
 use std::time::Instant;
+use std::env;
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    
+    if args.len() > 1 && args[1] == "--scaling" {
+        run_scaling_benchmark();
+        return;
+    }
+    
+    if args.len() > 1 && args[1] == "--blocked" {
+        run_blocked_comparison();
+        return;
+    }
+    
     println!("Matrix Multiplication Benchmark");
     println!("===============================");
     
@@ -45,6 +59,11 @@ fn main() {
     println!("   - Performance difference shows impact of memory layout!");
     println!("\n4. Run comprehensive benchmarks:");
     println!("   cargo +nightly bench");
+    println!("\n5. Run scaling benchmark for plotting:");
+    println!("   cargo run --release -- --scaling > scaling_data.txt");
+    println!("   cargo run --release -- --scaling 20 > scaling_stats.txt  # 20 trials with statistics");
+    println!("\n6. Run blocked algorithm comparison:");
+    println!("   cargo run --release -- --blocked > blocked_results.txt  # Compare block sizes");
 }
 
 fn test_simple() {
@@ -64,5 +83,96 @@ fn test_simple() {
     println!("  Matrix A is row-major: {}", a.is_row_major());
     let b_col = b.to_col_major();
     println!("  Matrix B converted to col-major: {}", b_col.is_col_major());
+}
+
+fn run_scaling_benchmark() {
+    let args: Vec<String> = env::args().collect();
+    let num_trials = if args.len() > 2 && args[2].parse::<usize>().is_ok() {
+        args[2].parse().unwrap()
+    } else {
+        20  // Default number of trials
+    };
+    
+    println!("size,algorithm,trial,time_ns,gflops");
+    
+    let sizes = [16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024];
+    
+    for &size in &sizes {
+        eprintln!("Benchmarking {}×{} matrices ({} trials each)...", size, size, num_trials);
+        
+        for trial in 0..num_trials {
+            // Generate fresh matrices for each trial to avoid cache effects
+            let a = Matrix::random(size, size);
+            let b = Matrix::random(size, size);
+            
+            // Benchmark naive algorithm
+            let start = Instant::now();
+            let _result = naive_matmul(&a, &b);
+            let naive_time_ns = start.elapsed().as_nanos();
+            let gflops_naive = (2.0 * (size as f64).powi(3)) / (naive_time_ns as f64);
+            println!("{},naive,{},{},{:.6}", size, trial, naive_time_ns, gflops_naive);
+            
+            // Small delay to avoid thermal throttling effects
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            
+            // Benchmark optimized algorithm with same matrices
+            let start = Instant::now();
+            let _result = dotprod_matmul_col_major_fast(&a, &b, unrolled_dotprod);
+            let optimized_time_ns = start.elapsed().as_nanos();
+            let gflops_optimized = (2.0 * (size as f64).powi(3)) / (optimized_time_ns as f64);
+            println!("{},optimized,{},{},{:.6}", size, trial, optimized_time_ns, gflops_optimized);
+            
+            // Small delay between trials
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    
+    eprintln!("Benchmark complete! {} trials per size, {} sizes total", num_trials, sizes.len());
+}
+
+fn run_blocked_comparison() {
+    println!("Blocked Matrix Multiplication Comparison");
+    println!("size,algorithm,block_size,time_ns,gflops");
+    
+    let sizes = [256, 512, 768, 1024]; // Focus on larger sizes where blocking helps
+    let block_sizes = [32, 48, 64, 96, 128];
+    
+    for &size in &sizes {
+        eprintln!("Testing {}×{} matrices...", size, size);
+        let a = Matrix::random(size, size);
+        let b = Matrix::random(size, size);
+        
+        // Test naive baseline
+        let start = Instant::now();
+        let _result = naive_matmul(&a, &b);
+        let naive_time_ns = start.elapsed().as_nanos();
+        let gflops_naive = (2.0 * (size as f64).powi(3)) / (naive_time_ns as f64);
+        println!("{},naive,0,{},{:.6}", size, naive_time_ns, gflops_naive);
+        
+        // Test current best non-blocked
+        let start = Instant::now();
+        let _result = dotprod_matmul_col_major_fast(&a, &b, unrolled_dotprod);
+        let optimized_time_ns = start.elapsed().as_nanos();
+        let gflops_optimized = (2.0 * (size as f64).powi(3)) / (optimized_time_ns as f64);
+        println!("{},optimized,0,{},{:.6}", size, optimized_time_ns, gflops_optimized);
+        
+        // Test different block sizes
+        for &block_size in &block_sizes {
+            let start = Instant::now();
+            let _result = blocked_matmul(&a, &b, block_size);
+            let blocked_time_ns = start.elapsed().as_nanos();
+            let gflops_blocked = (2.0 * (size as f64).powi(3)) / (blocked_time_ns as f64);
+            println!("{},blocked,{},{},{:.6}", size, block_size, blocked_time_ns, gflops_blocked);
+        }
+        
+        // Test ultimate blocked optimization
+        let start = Instant::now();
+        let _result = blocked_matmul_optimized(&a, &b, unrolled_dotprod);
+        let ultimate_time_ns = start.elapsed().as_nanos();
+        let gflops_ultimate = (2.0 * (size as f64).powi(3)) / (ultimate_time_ns as f64);
+        println!("{},blocked_ultimate,64,{},{:.6}", size, ultimate_time_ns, gflops_ultimate);
+    }
+    
+    eprintln!("Blocked comparison complete!");
 }
 
