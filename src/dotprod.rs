@@ -31,6 +31,57 @@ pub fn unrolled_dotprod(a: &[f64], b: &[f64]) -> f64 {
     sum
 }
 
+#[cfg(target_arch = "x86_64")]
+pub fn simd_dotprod(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len(), "Vector dimensions don't match");
+    
+    #[cfg(target_feature = "avx2")]
+    unsafe {
+        simd_dotprod_avx2(a, b)
+    }
+    #[cfg(not(target_feature = "avx2"))]
+    {
+        // Fallback to unrolled version
+        unrolled_dotprod(a, b)
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::*;
+    
+    let len = a.len();
+    let simd_len = len & !3; // Round down to multiple of 4
+    
+    let mut sum_vec = _mm256_setzero_pd();
+    
+    // Process 4 f64 elements at a time with AVX2
+    for i in (0..simd_len).step_by(4) {
+        let a_vec = _mm256_loadu_pd(a.as_ptr().add(i));
+        let b_vec = _mm256_loadu_pd(b.as_ptr().add(i));
+        let prod = _mm256_mul_pd(a_vec, b_vec);
+        sum_vec = _mm256_add_pd(sum_vec, prod);
+    }
+    
+    // Sum the 4 elements of sum_vec
+    let mut sum_arr = [0.0; 4];
+    _mm256_storeu_pd(sum_arr.as_mut_ptr(), sum_vec);
+    let mut sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+    
+    // Handle remaining elements
+    for i in simd_len..len {
+        sum += a[i] * b[i];
+    }
+    
+    sum
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn simd_dotprod(a: &[f64], b: &[f64]) -> f64 {
+    // Fallback for non-x86_64 architectures
+    unrolled_dotprod(a, b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,6 +119,17 @@ mod tests {
         let a = vec![1.0, 2.0];
         let b = vec![1.0, 2.0, 3.0];
         naive_dotprod(&a, &b);
+    }
+
+    #[test]
+    fn test_simd_dotprod() {
+        let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let b = vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+        
+        let simd_result = simd_dotprod(&a, &b);
+        let naive_result = naive_dotprod(&a, &b);
+        
+        assert!((simd_result - naive_result).abs() < 1e-10);
     }
 
 }

@@ -1,4 +1,5 @@
 use crate::Matrix;
+use crate::dotprod::simd_dotprod;
 
 pub fn dotprod_matmul<F>(a: &Matrix, b: &Matrix, dotprod_fn: F) -> Matrix 
 where 
@@ -255,6 +256,22 @@ where
 {
     // 64x64 block size optimized for 37KB L1d cache
     blocked_matmul_col_major_fast(a, b, 64, dotprod_fn)
+}
+
+pub fn simd_matmul(a: &Matrix, b: &Matrix) -> Matrix {
+    blocked_matmul_col_major_fast(a, b, 64, simd_dotprod)
+}
+
+pub fn simd_blocked_matmul_optimized(a: &Matrix, b: &Matrix) -> Matrix {
+    blocked_matmul_optimized(a, b, simd_dotprod)
+}
+
+pub fn simd_blocked_matmul_32(a: &Matrix, b: &Matrix) -> Matrix {
+    blocked_matmul_col_major_fast(a, b, 32, simd_dotprod)
+}
+
+pub fn simd_blocked_matmul_128(a: &Matrix, b: &Matrix) -> Matrix {
+    blocked_matmul_col_major_fast(a, b, 128, simd_dotprod)
 }
 
 #[cfg(test)]

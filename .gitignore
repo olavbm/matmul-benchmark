@@ -1,1 +1,9 @@
 /target
+
+# Analysis output files
+distribution_*.png
+speedup_analysis.png
+scaling_analysis.png
+scaling_data.txt
+scaling_stats*.txt
+plot_scaling.py
