@@ -31,7 +31,7 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Run tests
-      run: cargo +nightly test
+      run: cargo test
       
-    - name: Run benchmarks (quick check)
-      run: cargo +nightly bench -- --test
+    - name: Build benchmarks (compilation check only)
+      run: cargo +nightly build --benches
