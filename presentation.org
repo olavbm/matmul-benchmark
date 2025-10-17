@@ -1,0 +1,178 @@
+#+TITLE: High-Performance Matrix Multiplication in Rust
+#+AUTHOR: Olav
+#+DATE: 2025-10-17
+#+STARTUP: overview
+#+OPTIONS: toc:nil num:nil
+
+* Introduction
+** Why Matrix Multiplication Matters
+Matrix multiplication is *everywhere** in modern computing:
+
+- *Your screen right now*: Graphics transforms
+- *Scrolling*: 2D transform matrices
+- *Video playback*: FT, compression/decompression
+- *AI/ML inference*: neural network layers
+- *Physics simulations*: Rigid body dynamics, finite element analysis
+- *Audio processing*: Digital signal processing, equalizers, spatial audio
+
+*The bottleneck*: CPUs perform ~10⁹ operations/second, but naive matmul wastes most of it on cache misses
+
+** The Challenge
+
+#+BEGIN_QUOTE
+"A 1024×1024 matrix multiplication requires 2.1 billion floating point operations.
+
+Your CPU can theoretically do this in ~2 seconds.
+
+A naive implementation takes *minutes*. Why?"
+#+END_QUOTE
+
+** The Journey from Naive to SIMD
+
+- Started with basic O(n³) implementation (simple but slow)
+- Applied cache optimization techniques (blocking)
+- Integrated SIMD vectorization (AVX2)
+- Achieved competitive performance with hand-tuned libraries
+
+*Result*: 5.2x speedup on 1024×1024 matrices
+
+* Problem: Why Naive is Slow
+** Cache Misses Kill Performance
+
+#+BEGIN_SRC rust :exports both
+// Naive implementation - poor cache locality
+for i in 0..n {
+    for j in 0..n {
+        for k in 0..n {
+            c[i][j] += a[i][k] * b[k][j];  // b[k][j] = cache miss!
+        }
+    }
+}
+#+END_SRC
+
+** Live Demo: Naive Performance
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+cargo run --release -- --scaling 1 | grep "naive_matmul" | grep "512x512"
+#+END_SRC
+
+* Solution 1: Cache Blocking
+** Divide and Conquer for Cache
+
+- Split matrices into 64×64 blocks (fits in L1d cache: 37KB)
+- Process blocks instead of full rows/columns
+- Reuse data while it's still in cache
+
+** Block Size Analysis
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+cargo run --release -- --blocked 2>&1 | head -20
+#+END_SRC
+
+* Solution 2: SIMD Vectorization
+** Process 4 Numbers at Once
+
+#+BEGIN_SRC rust :exports code
+// AVX2: 4x f64 elements in parallel
+unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
+    let mut sum_vec = _mm256_setzero_pd();
+    for i in (0..len).step_by(4) {
+        let a_vec = _mm256_loadu_pd(a.as_ptr().add(i));
+        let b_vec = _mm256_loadu_pd(b.as_ptr().add(i));
+        sum_vec = _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec));
+    }
+    // Sum horizontal + remainder
+}
+#+END_SRC
+
+** Dot Product Benchmark: We Beat nalgebra!
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+cargo +nightly bench vector_dotprod 2>&1 | grep -A2 "1024 elements"
+#+END_SRC
+
+* Results: Performance Comparison
+** The Numbers
+
+| Matrix Size | Naive    | Blocked  | SIMD     | Speedup |
+|-------------+----------+----------+----------+---------|
+| 256×256     | ~30ms    | ~13.4ms  | *8.9ms*  | 3.4x    |
+| 512×512     | ~300ms   | ~120ms   | *76.8ms* | 3.9x    |
+| 1024×1024   | ~2400ms  | ~800ms   | *463ms*  | 5.2x    |
+
+** Live Benchmark: Full Scaling Analysis
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+cargo run --release -- --scaling 1 | grep -E "(16x16|128x128|512x512|1024x1024)" | head -12
+#+END_SRC
+
+* Cache Hierarchy Visualization
+** Hardware Constraints
+
+- *L1d*: 37 KB per core → 64×64 blocks optimal
+- *L2*: 1.5 MB per core → performance crossover at ~384×384
+- *L3*: 18 MB shared → dramatic speedup at 512×512+
+
+** Performance Visualization
+
+#+BEGIN_SRC sh :results file :file performance.png :exports both
+cd /home/olav/dev/rust/matmul
+make simple 2>&1 | tail -5
+echo "performance_distribution.png"
+#+END_SRC
+
+* Interactive Demo: Run Your Own Tests
+** Try Different Matrix Sizes
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+# Change the size here and re-run!
+SIZE=256
+cargo run --release -- --scaling 1 | grep "${SIZE}x${SIZE}" | head -3
+#+END_SRC
+
+** Compare Specific Algorithms
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+cargo +nightly bench mm/simd_matmul_512 2>&1 | grep "time:"
+#+END_SRC
+
+* Key Takeaways
+** What We Learned
+
+1. *Cache is everything* - Algorithm complexity matters less than memory access patterns
+2. *Blocking is powerful* - Simple technique, massive gains
+3. *SIMD closes the gap* - We're now only 7x slower than BLAS (was 10x)
+4. *Measure everything* - Statistical analysis reveals the truth
+
+** The Gap to BLAS (128×128)
+
+- Our SIMD: 1,734 ms
+- Intel MKL BLAS: 247 ms
+- *Gap*: 7x (improvement from 10x!)
+
+* Future Work
+** Next Steps
+
+- Multi-level cache blocking (L1 + L2 + L3 hierarchical)
+- FMA instructions (fused multiply-add)
+- Memory prefetching in SIMD loops
+- Thread-level parallelism
+- GPU acceleration?
+
+* Questions?
+
+** Live Benchmarking
+
+Ready to run any tests you want to see!
+
+#+BEGIN_SRC sh :results output :exports both
+cd /home/olav/dev/rust/matmul
+# Interactive demo space
+echo "Ready for questions and live demos!"
+#+END_SRC
