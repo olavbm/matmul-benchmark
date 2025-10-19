@@ -144,45 +144,145 @@ Performance is measured in:
 1. **Benchmarking methodology**: Using `test::black_box()` to prevent compiler optimizations
 2. **Performance measurement**: Importance of measuring actual performance vs. theoretical expectations
 
-## 🚀 Next Steps: Cache Blocking
+## ✅ Implemented Optimizations
 
-The next major optimization to implement is **cache blocking** (also called "tiling"), which should dramatically improve performance by better utilizing the CPU cache hierarchy.
+The project has successfully implemented:
+- ✅ **Cache blocking**: 64×64 blocks optimized for L1d cache (5.2x speedup on 1024×1024)
+- ✅ **SIMD vectorization**: AVX2 achieving 1.7x speedup (271ns dot product vs nalgebra's 288ns)
+- ✅ **GPU exploration**: ArrayFire with 157 GFLOPS on Intel iGPU (2.63x speedup on 1024×1024)
 
-### Current Performance Gap
-- **BLAS**: ~241μs (highly optimized)
-- **Our best**: ~2,192μs (`dotprod_matmul_col_major_fast` with `unrolled_dotprod`)
-- **Gap**: ~9x slower than BLAS
+### Current Performance (1024×1024)
+- **Naive CPU**: 5,812ms
+- **SIMD CPU**: 1,632ms (3.6x faster)
+- **BLAS (MKL)**: 7.81ms (743x faster than naive!)
+- **GPU (OpenCL)**: 13.71ms (424x faster than naive)
 
-### Cache Blocking Strategy
+## 🚀 Future CPU Optimizations
 
-Instead of computing each result element completely in one pass, cache blocking processes the matrices in small blocks that fit in L1 cache:
+While we've achieved strong performance with SIMD and cache blocking, there's still a **7x gap** between our handwritten SIMD code (1,734ms for 128×128) and BLAS (247ms). Here are the optimizations that could close that gap:
+
+### High-Impact Optimizations
+
+#### 1. **Multi-Threading with Rayon** ⭐ Easiest, biggest win
+Currently single-threaded. Parallel processing is almost free performance:
 
 ```rust
-// Traditional: C[i,j] = sum of A[i,k] * B[k,j] for k=0..n (all at once)
-// Blocked: C[i,j] += sum of A[i,k] * B[k,j] for k in each block (partial sums)
+use rayon::prelude::*;
+
+// Parallelize outer block loop
+(0..a.rows).into_par_iter().step_by(BLOCK_SIZE)
+    .for_each(|i| {
+        // Compute blocks in parallel
+    });
 ```
 
-### Target Cache Sizes (Intel i7-1260P)
-- **L1d cache**: 37.3 KiB per core
-- **Optimal block sizes**: 24×24 (4.6KB), 32×32 (8.2KB), or 48×48 (18.4KB)
-- **Strategy**: Keep 2-3 blocks in L1 simultaneously (A block, B block, result block)
+**Expected speedup**: 6-8× on 12-core system
+**Complexity**: Low (just add Rayon)
 
-### Implementation Plan
-1. **`blocked_matmul`**: 6-nested-loop cache-blocked algorithm
-2. **Block size optimization**: Test 24×24, 32×32, 48×48 to find optimal size
-3. **Hybrid approach**: Combine blocking with existing dot product optimizations
-4. **Expected improvement**: Should get much closer to BLAS performance
+#### 2. **Fused Multiply-Add (FMA) Instructions** ⭐ Better SIMD throughput
+Current SIMD uses separate multiply and add. FMA does both in one instruction:
 
-### The Algorithm (Conceptual)
 ```rust
-for kk in (0..n).step_by(BLOCK_SIZE) {      // Which "slice" of dot product
-    for ii in (0..n).step_by(BLOCK_SIZE) {  // Which row block of result
-        for jj in (0..n).step_by(BLOCK_SIZE) { // Which col block of result
-            // Process BLOCK_SIZE × BLOCK_SIZE sub-matrices
-            // This keeps data in L1 cache much longer
-        }
-    }
+// Current: _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec))
+// FMA:     _mm256_fmadd_pd(a_vec, b_vec, sum_vec)
+```
+
+**Expected speedup**: ~2× throughput for core computation
+**Complexity**: Medium (replace AVX2 with FMA intrinsics)
+**Bonus**: Better numerical accuracy
+
+#### 3. **Multi-Level Cache Blocking** ⭐ Better large matrix performance
+Current blocking only targets L1 cache (64×64). Add L2/L3 levels:
+
+```rust
+// Two-level blocking: L2 blocks (256×256) → L1 blocks (64×64)
+pub fn multi_level_blocked_matmul(a: &Matrix, b: &Matrix) -> Matrix {
+    const L2_BLOCK: usize = 256;  // Fits in L2 (1.5 MB)
+    const L1_BLOCK: usize = 64;   // Fits in L1 (37 KB)
+
+    // Outer loop over L2_BLOCK tiles
+    // Inner loop over L1_BLOCK sub-tiles within each L2 tile
 }
 ```
 
-This approach should bridge much of the performance gap to BLAS by dramatically improving cache utilization.
+**Expected speedup**: 1.2-1.5× for matrices > 512×512
+**Complexity**: Medium (hierarchical blocking logic)
+
+#### 4. **Register Blocking / Micro-Kernel Optimization** ⭐ Maximum performance
+Compute multiple output elements per inner loop to maximize register reuse:
+
+```rust
+// Compute 4×4 output block per iteration instead of 1×1
+// Keeps 4 rows of A and 4 cols of B in registers
+// Reduces memory traffic by 4×
+```
+
+This is what BLAS libraries (BLIS, OpenBLAS) do to approach peak FLOPS.
+
+**Expected speedup**: 1.5-2×
+**Complexity**: High (most advanced optimization)
+
+### Advanced Optimizations
+
+#### 5. **Memory Prefetching**
+Explicitly prefetch data before it's needed:
+
+```rust
+#[cfg(target_arch = "x86_64")]
+unsafe {
+    use std::arch::x86_64::_mm_prefetch;
+    _mm_prefetch(ptr.add(cache_line_offset) as *const i8, _MM_HINT_T0);
+}
+```
+
+**Expected speedup**: 1.1-1.2×
+**Complexity**: Medium (requires careful tuning)
+
+#### 6. **Non-Temporal Stores**
+For very large matrices, bypass cache when writing results:
+
+```rust
+// Use _mm256_stream_pd instead of _mm256_storeu_pd for output
+// Prevents cache pollution for write-only data
+```
+
+**Expected speedup**: 1.1-1.3× for very large matrices
+**Complexity**: Low (simple API change)
+
+#### 7. **Wider SIMD (AVX-512)**
+Current AVX2 processes 4×f64. AVX-512 can do 8×f64:
+
+```rust
+// AVX2: 4×f64 per instruction
+// AVX-512: 8×f64 per instruction (if CPU supports it)
+```
+
+**Expected speedup**: ~1.5-2× (if hardware supports AVX-512)
+**Complexity**: Medium (check CPU support, update intrinsics)
+
+#### 8. **Algorithm Changes**
+
+- **Strassen's Algorithm**: O(n^2.807) instead of O(n³) for very large matrices
+- **Winograd Variant**: Reduces multiplications at cost of more additions
+- **Panel-Panel Multiply**: How modern BLAS libraries organize computation
+
+**Expected speedup**: Varies (Strassen good for N > 2048)
+**Complexity**: High (fundamentally different algorithm)
+
+### Roadmap to Close the Gap
+
+Current gap analysis (128×128):
+- **Our SIMD**: 1,734ms
+- **BLAS**: 247ms (7× faster)
+
+The gap comes from:
+1. **No multi-threading**: 4-8× potential speedup
+2. **No FMA**: ~2× potential speedup
+3. **No register blocking**: 1.5-2× potential speedup
+4. **No L2/L3 blocking**: 1.2-1.5× potential for large matrices
+
+**Realistic target**: Implementing **threading + FMA** alone could close the gap to ~2× vs BLAS, which would be excellent for educational handwritten code!
+
+### Recommended Next Step
+
+**Start with multi-threading** - it's the easiest to implement and gives the biggest performance boost. Adding Rayon parallelism to the existing blocked SIMD code would immediately get you 6-8× faster with minimal code changes.
