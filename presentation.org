@@ -142,6 +142,68 @@ cd /home/olav/dev/rust/matmul
 cargo +nightly bench mm/simd_matmul_512 2>&1 | grep "time:"
 #+END_SRC
 
+* Solution 3: GPU Acceleration
+** Why GPUs Excel at Matrix Multiplication
+
+*Massive parallelism*: While CPUs have 4-16 cores, GPUs have thousands of cores
+
+#+BEGIN_QUOTE
+"Intel Alder Lake: 12 cores, ~3 GHz
+NVIDIA RTX 4090: 16,384 CUDA cores, ~2.5 GHz
+
+Matrix multiplication is *embarrassingly parallel* - perfect for GPUs!"
+#+END_QUOTE
+
+** ArrayFire: High-Performance GPU Computing in Rust
+
+#+BEGIN_SRC rust :exports code
+use arrayfire::*;
+
+// Create matrices on GPU
+let a = randu::<f32>(dim4!(1024, 1024, 1, 1));
+let b = randu::<f32>(dim4!(1024, 1024, 1, 1));
+
+// GPU matrix multiplication (single line!)
+let c = matmul(&a, &b, MatProp::NONE, MatProp::NONE);
+
+// ArrayFire handles:
+// - Memory transfer to/from GPU
+// - Optimal kernel selection
+// - Multi-device management
+#+END_SRC
+
+** GPU Performance Potential
+
+Theoretical speedup for 1024×1024:
+
+| Implementation | Time (est.) | Speedup vs Naive |
+|----------------+-------------+------------------|
+| Naive CPU      | ~2400ms     | 1x               |
+| Our SIMD       | 463ms       | *5.2x*           |
+| GPU (OpenCL)   | ~50-100ms   | *24-48x*         |
+| GPU (CUDA)     | ~10-20ms    | *120-240x*       |
+
+*Note*: GPU shines for large matrices (>1024×1024), smaller sizes suffer from transfer overhead
+
+** Live Demo: GPU Setup
+
+#+BEGIN_SRC sh :results output :exports both
+# Check if we have GPU compute available
+if command -v clinfo >/dev/null 2>&1; then
+    echo "OpenCL Status:"
+    clinfo -l 2>/dev/null || echo "OpenCL runtime needs installation"
+else
+    echo "Install OpenCL: sudo apt install clinfo ocl-icd-opencl-dev intel-opencl-icd"
+fi
+
+# Check ArrayFire availability
+if cargo tree 2>/dev/null | grep -q arrayfire; then
+    echo -e "\nArrayFire: Installed ✓"
+else
+    echo -e "\nTo add GPU support: cargo add arrayfire"
+fi
+#+END_SRC
+
 * Key Takeaways
 ** What We Learned
 
@@ -149,12 +211,13 @@ cargo +nightly bench mm/simd_matmul_512 2>&1 | grep "time:"
 2. *Blocking is powerful* - Simple technique, massive gains
 3. *SIMD closes the gap* - We're now only 7x slower than BLAS (was 10x)
 4. *Measure everything* - Statistical analysis reveals the truth
+5. *GPUs change the game* - Massive parallelism unlocks 100x+ speedups for large matrices
 
-** The Gap to BLAS (128×128)
+** The Performance Ladder
 
 - Our SIMD: 1,734 ms
-- Intel MKL BLAS: 247 ms
-- *Gap*: 7x (improvement from 10x!)
+- Intel MKL BLAS: 247 ms (*Gap*: 7x)
+- GPU (projected): ~20-50 ms (*Gap*: 35-87x faster than SIMD!)
 
 * Future Work
 ** Next Steps

@@ -1,0 +1,9 @@
+[package]
+name = "arrayfire_demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrayfire = "3.8"
+af-opencl-interop = "3.7"
+ocl-core = "0.11"
