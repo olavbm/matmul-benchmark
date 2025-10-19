@@ -203,6 +203,66 @@ make view               # Open generated plots
 - **Buffer reuse vs allocation**: Zero-allocation versions show dramatic improvements
 - **Dot product abstraction**: Enables easy performance comparisons and optimizations
 
+## GPU Acceleration Exploration
+
+### ArrayFire Integration
+- **Library**: ArrayFire 3.8 with OpenCL backend
+- **Build**: Custom build from source with Intel oneAPI MKL 2025.2
+- **Backend switching**: Dynamic CPU (MKL) vs OpenCL (GPU) selection
+
+### GPU Performance Results (Intel Integrated GPU)
+Matrix multiplication performance comparison:
+
+| Matrix Size | CPU (MKL) | GPU (OpenCL) | Speedup |
+|------------|-----------|--------------|---------|
+| 256×256    | 0.61ms    | 2.47ms       | 0.25x   |
+| 512×512    | 4.39ms    | 5.41ms       | 0.81x   |
+| 1024×1024  | 36.11ms   | 13.71ms      | **2.63x** |
+
+**Peak Performance**: 157 GFLOPS on 1024×1024 matrices
+
+### Key GPU Insights
+1. **Transfer overhead dominates small matrices**: GPU slower for N < 1024 due to PCIe/memory transfer
+2. **Integrated GPU advantage**: Shares system RAM, reducing transfer overhead vs discrete GPUs
+3. **Scaling characteristics**: GPU advantage increases with matrix size
+4. **CPU multi-threading**: ArrayFire's CPU backend uses all cores, competitive with GPU for medium sizes
+
+### Custom OpenCL Kernels
+Implemented educational examples showing raw GPU programming:
+
+**Naive Kernel** (`custom_matmul.rs`):
+```c
+__kernel void matmul_naive(__global const float* A,
+                           __global const float* B,
+                           __global float* C, const int N)
+{
+    int row = get_global_id(0);
+    int col = get_global_id(1);
+    float sum = 0.0f;
+    for (int k = 0; k < N; k++) {
+        sum += A[row * N + k] * B[k * N + col];
+    }
+    C[row * N + col] = sum;
+}
+```
+
+**Cache-Blocked Kernel** (`custom_matmul_blocked.rs`):
+- Uses GPU local memory (16×16 tiles) analogous to CPU L1 cache
+- Demonstrates GPU memory hierarchy optimization
+- Reduces global memory accesses through shared memory blocking
+
+### GPU vs CPU Architecture Comparison
+- **CPU**: 4-16 cores, deep cache hierarchy (L1/L2/L3), complex out-of-order execution
+- **GPU**: Thousands of simple cores, memory hierarchy (registers/local/global), massive parallelism
+- **Trade-off**: GPU excels at throughput, CPU excels at latency and sequential tasks
+
+### Interactive Presentation
+Created `presentation.org` for Doom Emacs org-tree-slide:
+- Live code execution in Org-mode
+- GPU acceleration section with performance tables
+- Custom navigation (C-j/C-k for slide movement)
+- Progressive reveal using outline folding
+
 ## Next Development Opportunities
 
 ### Immediate Improvements
@@ -214,7 +274,7 @@ make view               # Open generated plots
 
 ### Advanced Features
 1. **Parallel processing**: Thread-level parallelism for large matrices
-2. **GPU acceleration**: CUDA/OpenCL integration
+2. **~~GPU acceleration~~**: ✅ **EXPLORED** - ArrayFire integration with custom OpenCL kernels
 3. **Mixed precision**: f16/f32/f64 optimization
 4. **Specialized shapes**: Rectangular matrix optimizations
 
@@ -241,6 +301,18 @@ cargo run --release -- --scaling 50 > data.txt  # 50-trial statistical data
 python3 analyze_stats.py data.txt                # Comprehensive analysis
 ```
 
+### GPU Benchmarking (ArrayFire)
+```bash
+# Run GPU vs CPU comparison
+cd arrayfire_demo
+env LD_LIBRARY_PATH=/home/olav/dev/arrayfire/build/src/api/unified:/home/olav/dev/arrayfire/build/src/backend/opencl:/home/olav/dev/arrayfire/build/src/backend/cpu:/opt/intel/oneapi/compiler/2025.2/lib \
+    cargo run --release --example simple_comparison
+
+# Educational custom kernels
+cargo run --release --example custom_matmul         # Naive kernel
+cargo run --release --example custom_matmul_blocked # Cache-blocked kernel
+```
+
 ## File Structure
 ```
 src/
@@ -248,7 +320,7 @@ src/
 ├── main.rs             # Interactive benchmarking + CLI
 ├── matrix.rs           # Matrix data structure + state tracking
 ├── implementations.rs  # All matrix multiplication algorithms
-├── dotprod.rs         # Dot product implementations  
+├── dotprod.rs         # Dot product implementations
 ├── benchmark.rs       # Performance measurement utilities
 └── test_data.rs       # Test matrix generation
 
@@ -256,13 +328,29 @@ analysis/
 ├── analyze_stats.py   # Statistical analysis tool
 ├── scaling.plt        # gnuplot script
 └── Makefile          # Automated workflow
+
+arrayfire_demo/        # GPU exploration with ArrayFire
+├── Cargo.toml         # Dependencies: arrayfire, af-opencl-interop
+├── src/main.rs        # ArrayFire demo entry point
+└── examples/
+    ├── simple_comparison.rs      # GPU vs CPU benchmark (working)
+    ├── custom_matmul.rs          # Naive OpenCL kernel (educational)
+    └── custom_matmul_blocked.rs  # Cache-blocked OpenCL kernel
+
+presentation.org       # Interactive Org-mode slideshow
 ```
 
 ---
 
-**Last Updated**: Implementation of SIMD-accelerated matrix multiplication achieving major performance improvements:
-- **SIMD dot product faster than nalgebra**: 271ns vs 288ns (1024 elements)  
-- **1.7x matrix multiplication speedup**: SIMD reduces 256×256 from 13.4ms → 8.9ms
-- **Gap with BLAS reduced**: From 10x to 7x performance gap through SIMD optimization
-- **Clean benchmark organization**: Separated `vector_dotprod` vs `mm` benchmarks for targeted analysis
-- **Comprehensive SIMD variants**: Multiple blocking strategies combined with AVX2 vectorization
+**Last Updated**: GPU acceleration exploration with ArrayFire and custom OpenCL kernels:
+- **GPU exploration**: Built ArrayFire from source with Intel oneAPI MKL 2025.2
+- **Performance comparison**: GPU achieves 157 GFLOPS (2.63x speedup on 1024×1024)
+- **Custom kernels**: Implemented naive and cache-blocked OpenCL kernels for educational purposes
+- **Architecture insights**: GPU excels for large matrices (N ≥ 1024), CPU dominates for smaller sizes due to transfer overhead
+- **Interactive presentation**: Created Org-mode slideshow with live code execution in Doom Emacs
+- **Complete performance spectrum**: CPU naive → CPU SIMD → CPU MKL → GPU OpenCL documented
+
+**Previous Major Updates**:
+- **SIMD implementation**: AVX2 vectorization achieving 1.7x speedup (271ns dot product vs nalgebra's 288ns)
+- **Cache blocking**: 64×64 blocks optimized for L1d cache (5.2x speedup on 1024×1024)
+- **Statistical analysis**: Multi-trial benchmarking with confidence intervals and visualization
