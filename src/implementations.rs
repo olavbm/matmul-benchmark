@@ -25,7 +25,7 @@
 //! - **64×64 blocks**: Optimal for L1d (32KB fits in 37KB)
 //! - **Performance cliffs** observed at L2/L3 boundaries (384×384, 512×512)
 
-use crate::Matrix;
+use crate::{Matrix, MatrixOps};
 use crate::dotprod::simd_dotprod;
 
 /// Default block size optimized for L1d cache (37.3 KiB per core)
@@ -131,20 +131,24 @@ where
 /// # Example
 /// ```
 /// use matmul::{Matrix, naive_matmul};
-/// let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-/// let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+/// let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+/// let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
 /// let c = naive_matmul(&a, &b);
 /// assert_eq!(c.get(0, 0), 19.0); // 1*5 + 2*7
 /// ```
-pub fn naive_matmul(a: &Matrix, b: &Matrix) -> Matrix {
-    assert_eq!(a.cols, b.rows, "Matrix dimensions don't match");
+pub fn naive_matmul<A, B>(a: &A, b: &B) -> Matrix
+where
+    A: MatrixOps,
+    B: MatrixOps,
+{
+    assert_eq!(a.cols(), b.rows(), "Matrix dimensions don't match");
 
-    let mut result = Matrix::new(a.rows, b.cols);
+    let mut result = Matrix::new(a.rows(), b.cols());
 
-    for i in 0..a.rows {
-        for j in 0..b.cols {
+    for i in 0..a.rows() {
+        for j in 0..b.cols() {
             let mut sum = 0.0;
-            for k in 0..a.cols {
+            for k in 0..a.cols() {
                 sum += a.get(i, k) * b.get(k, j);
             }
             result.set(i, j, sum);
@@ -370,8 +374,8 @@ mod tests {
     #[test]
     fn test_blocked_matmul_correctness() {
         // Test: [[1,2],[3,4]] × [[5,6],[7,8]] = [[19,22],[43,50]]
-        let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+        let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
         
         let result = blocked_matmul(&a, &b, 1); // Block size 1 (essentially naive)
         
@@ -448,8 +452,8 @@ mod tests {
     #[test]
     fn test_simple_2x2_matmul() {
         // Test: [[1,2],[3,4]] × [[5,6],[7,8]] = [[19,22],[43,50]]
-        let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+        let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
         
         let result = naive_matmul(&a, &b);
         
@@ -464,8 +468,8 @@ mod tests {
         use crate::dotprod::naive_dotprod;
         
         // Test: [[1,2],[3,4]] × [[5,6],[7,8]] = [[19,22],[43,50]]
-        let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+        let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
         
         let result = dotprod_matmul(&a, &b, naive_dotprod);
         
@@ -480,8 +484,8 @@ mod tests {
         use crate::dotprod::unrolled_dotprod;
         
         // Same test but with unrolled dot product
-        let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+        let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
         
         let result = dotprod_matmul(&a, &b, unrolled_dotprod);
         
@@ -515,8 +519,8 @@ mod tests {
         use crate::dotprod::naive_dotprod;
         
         // Test: [[1,2],[3,4]] × [[5,6],[7,8]] = [[19,22],[43,50]]
-        let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+        let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
         
         let result = dotprod_matmul_fast(&a, &b, naive_dotprod);
         
@@ -550,8 +554,8 @@ mod tests {
         use crate::dotprod::unrolled_dotprod;
         
         // Test: [[1,2],[3,4]] × [[5,6],[7,8]] = [[19,22],[43,50]]
-        let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-        let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+        let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+        let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
         
         let result = dotprod_matmul_col_major_fast(&a, &b, unrolled_dotprod);
         
