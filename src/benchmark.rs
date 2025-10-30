@@ -1,4 +1,8 @@
-// Simplified benchmarking - just basic timing for now
+//! Performance benchmarking utilities for matrix multiplication.
+//!
+//! Provides simple timing and GFLOP/s calculation for comparing different
+//! matrix multiplication implementations.
+
 use crate::Matrix;
 use std::time::{Duration, Instant};
 

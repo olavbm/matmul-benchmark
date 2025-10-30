@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Matrix Multiplication Animations</title>
+    <style>
+        body {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: monospace;
+            padding: 20px;
+        }
+        h1 { color: #4ec9b0; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        canvas {
+            border: 1px solid #444;
+            display: block;
+            margin: 20px 0;
+        }
+        .stats {
+            font-size: 18px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Matrix Multiplication Visualizations</h1>
+
+    <button onclick="showViz('naive')">Naive</button>
+    <button onclick="showViz('blocked')">Blocked</button>
+    <button onclick="showViz('simd')">SIMD</button>
+
+    <div id="viz-container"></div>
+
+    <script>
+        const MATRIX_SIZE = 8; // Small for clear visualization
+        const CELL_SIZE = 40;
+        const PADDING = 50;
+
+        let currentAnimation = null;
+
+        function showViz(type) {
+            if (currentAnimation) currentAnimation.stop();
+
+            const container = document.getElementById('viz-container');
+            container.innerHTML = `
+                <h2>${type.toUpperCase()} Matrix Multiplication</h2>
+                <canvas id="canvas" width="1200" height="400"></canvas>
+                <div class="stats">
+                    <div>Operations: <span id="ops">0</span></div>
+                    <div>Cache Misses: <span id="misses">0</span></div>
+                </div>
+                <button onclick="currentAnimation.start()">Start</button>
+                <button onclick="currentAnimation.reset()">Reset</button>
+            `;
+
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (type === 'naive') {
+                currentAnimation = new NaiveAnimation(ctx);
+            } else if (type === 'blocked') {
+                currentAnimation = new BlockedAnimation(ctx);
+            } else if (type === 'simd') {
+                currentAnimation = new SimdAnimation(ctx);
+            }
+        }
+
+        class NaiveAnimation {
+            constructor(ctx) {
+                this.ctx = ctx;
+                this.i = 0; this.j = 0; this.k = 0;
+                this.ops = 0;
+                this.misses = 0;
+                this.running = false;
+                this.draw();
+            }
+
+            start() {
+                this.running = true;
+                this.step();
+            }
+
+            stop() {
+                this.running = false;
+            }
+
+            reset() {
+                this.stop();
+                this.i = 0; this.j = 0; this.k = 0;
+                this.ops = 0; this.misses = 0;
+                this.draw();
+            }
+
+            step() {
+                if (!this.running) return;
+
+                // Naive triple loop: for i, for j, for k
+                this.ops++;
+
+                // B accessed column-wise = cache miss!
+                if (this.k % 4 === 0) this.misses++;
+
+                this.k++;
+                if (this.k >= MATRIX_SIZE) {
+                    this.k = 0;
+                    this.j++;
+                }
+                if (this.j >= MATRIX_SIZE) {
+                    this.j = 0;
+                    this.i++;
+                }
+
+                if (this.i >= MATRIX_SIZE) {
+                    this.running = false;
+                }
+
+                this.draw();
+
+                if (this.running) {
+                    setTimeout(() => this.step(), 100);
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#1e1e1e';
+                ctx.fillRect(0, 0, 1200, 400);
+
+                // Draw matrices A, B, C
+                this.drawMatrix(PADDING, PADDING, 'A', '#569cd6');
+                this.drawMatrix(PADDING + MATRIX_SIZE * CELL_SIZE + 50, PADDING, 'B', '#4ec9b0');
+                this.drawMatrix(PADDING + 2 * (MATRIX_SIZE * CELL_SIZE + 50), PADDING, 'C', '#dcdcaa');
+
+                // Highlight current positions
+                ctx.fillStyle = '#f48771';
+                ctx.fillRect(PADDING + this.k * CELL_SIZE, PADDING + this.i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                ctx.fillRect(PADDING + MATRIX_SIZE * CELL_SIZE + 50 + this.j * CELL_SIZE, PADDING + this.k * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                ctx.fillRect(PADDING + 2 * (MATRIX_SIZE * CELL_SIZE + 50) + this.j * CELL_SIZE, PADDING + this.i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+                document.getElementById('ops').textContent = this.ops;
+                document.getElementById('misses').textContent = this.misses;
+            }
+
+            drawMatrix(x, y, label, color) {
+                const ctx = this.ctx;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+
+                for (let i = 0; i < MATRIX_SIZE; i++) {
+                    for (let j = 0; j < MATRIX_SIZE; j++) {
+                        ctx.strokeRect(x + j * CELL_SIZE, y + i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+
+                ctx.fillStyle = color;
+                ctx.font = '20px monospace';
+                ctx.fillText(label, x + MATRIX_SIZE * CELL_SIZE / 2 - 10, y - 10);
+            }
+        }
+
+        class BlockedAnimation {
+            constructor(ctx) {
+                this.ctx = ctx;
+                this.blockSize = 4; // 4x4 blocks
+                this.bi = 0; this.bj = 0; this.bk = 0;
+                this.i = 0; this.j = 0; this.k = 0;
+                this.ops = 0;
+                this.misses = 0;
+                this.running = false;
+                this.draw();
+            }
+
+            start() {
+                this.running = true;
+                this.step();
+            }
+
+            stop() {
+                this.running = false;
+            }
+
+            reset() {
+                this.stop();
+                this.bi = 0; this.bj = 0; this.bk = 0;
+                this.i = 0; this.j = 0; this.k = 0;
+                this.ops = 0; this.misses = 0;
+                this.draw();
+            }
+
+            step() {
+                if (!this.running) return;
+
+                this.ops++;
+
+                // Far fewer cache misses - data in blocks!
+                if (this.k === 0 && this.j === 0) this.misses++;
+
+                // Inner loops within block
+                this.k++;
+                if (this.k >= Math.min(this.blockSize, MATRIX_SIZE - this.bk)) {
+                    this.k = 0;
+                    this.j++;
+                }
+                if (this.j >= Math.min(this.blockSize, MATRIX_SIZE - this.bj)) {
+                    this.j = 0;
+                    this.i++;
+                }
+                if (this.i >= Math.min(this.blockSize, MATRIX_SIZE - this.bi)) {
+                    this.i = 0;
+                    this.bk += this.blockSize;
+                }
+
+                // Outer loops over blocks
+                if (this.bk >= MATRIX_SIZE) {
+                    this.bk = 0;
+                    this.bj += this.blockSize;
+                }
+                if (this.bj >= MATRIX_SIZE) {
+                    this.bj = 0;
+                    this.bi += this.blockSize;
+                }
+                if (this.bi >= MATRIX_SIZE) {
+                    this.running = false;
+                }
+
+                this.draw();
+
+                if (this.running) {
+                    setTimeout(() => this.step(), 100);
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#1e1e1e';
+                ctx.fillRect(0, 0, 1200, 400);
+
+                // Draw matrices with blocks highlighted
+                this.drawMatrix(PADDING, PADDING, 'A', '#569cd6');
+                this.drawMatrix(PADDING + MATRIX_SIZE * CELL_SIZE + 50, PADDING, 'B', '#4ec9b0');
+                this.drawMatrix(PADDING + 2 * (MATRIX_SIZE * CELL_SIZE + 50), PADDING, 'C', '#dcdcaa');
+
+                // Highlight current blocks in all three matrices
+                const ai = this.bi + this.i;
+                const aj = this.bk + this.k;
+                const bj = this.bj + this.j;
+
+                // Block in A (rows bi to bi+blockSize, cols bk to bk+blockSize)
+                ctx.fillStyle = 'rgba(86, 156, 214, 0.3)';
+                ctx.fillRect(
+                    PADDING + this.bk * CELL_SIZE,
+                    PADDING + this.bi * CELL_SIZE,
+                    this.blockSize * CELL_SIZE,
+                    this.blockSize * CELL_SIZE
+                );
+
+                // Block in B (rows bk to bk+blockSize, cols bj to bj+blockSize)
+                ctx.fillStyle = 'rgba(78, 201, 176, 0.3)';
+                ctx.fillRect(
+                    PADDING + MATRIX_SIZE * CELL_SIZE + 50 + this.bj * CELL_SIZE,
+                    PADDING + this.bk * CELL_SIZE,
+                    this.blockSize * CELL_SIZE,
+                    this.blockSize * CELL_SIZE
+                );
+
+                // Block in C (rows bi to bi+blockSize, cols bj to bj+blockSize)
+                ctx.fillStyle = 'rgba(220, 220, 170, 0.3)';
+                ctx.fillRect(
+                    PADDING + 2 * (MATRIX_SIZE * CELL_SIZE + 50) + this.bj * CELL_SIZE,
+                    PADDING + this.bi * CELL_SIZE,
+                    this.blockSize * CELL_SIZE,
+                    this.blockSize * CELL_SIZE
+                );
+
+                // Highlight current cells being computed
+                ctx.fillStyle = '#f48771';
+                ctx.fillRect(PADDING + aj * CELL_SIZE, PADDING + ai * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                ctx.fillRect(PADDING + MATRIX_SIZE * CELL_SIZE + 50 + bj * CELL_SIZE, PADDING + aj * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                ctx.fillRect(PADDING + 2 * (MATRIX_SIZE * CELL_SIZE + 50) + bj * CELL_SIZE, PADDING + ai * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+                document.getElementById('ops').textContent = this.ops;
+                document.getElementById('misses').textContent = this.misses;
+            }
+
+            drawMatrix(x, y, label, color) {
+                const ctx = this.ctx;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+
+                for (let i = 0; i < MATRIX_SIZE; i++) {
+                    for (let j = 0; j < MATRIX_SIZE; j++) {
+                        ctx.strokeRect(x + j * CELL_SIZE, y + i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+
+                // Draw block boundaries
+                ctx.strokeStyle = '#858585';
+                ctx.lineWidth = 3;
+                for (let i = 0; i <= MATRIX_SIZE; i += this.blockSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, y + i * CELL_SIZE);
+                    ctx.lineTo(x + MATRIX_SIZE * CELL_SIZE, y + i * CELL_SIZE);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(x + i * CELL_SIZE, y);
+                    ctx.lineTo(x + i * CELL_SIZE, y + MATRIX_SIZE * CELL_SIZE);
+                    ctx.stroke();
+                }
+
+                ctx.fillStyle = color;
+                ctx.font = '20px monospace';
+                ctx.fillText(label, x + MATRIX_SIZE * CELL_SIZE / 2 - 10, y - 10);
+            }
+        }
+
+        class SimdAnimation {
+            constructor(ctx) {
+                this.ctx = ctx;
+                this.i = 0; this.j = 0; this.k = 0;
+                this.ops = 0;
+                this.running = false;
+                this.draw();
+            }
+
+            start() {
+                this.running = true;
+                this.step();
+            }
+
+            stop() {
+                this.running = false;
+            }
+
+            reset() {
+                this.stop();
+                this.i = 0; this.j = 0; this.k = 0;
+                this.ops = 0;
+                this.draw();
+            }
+
+            step() {
+                if (!this.running) return;
+
+                this.ops++;
+
+                // Process 4 elements at once!
+                this.k += 4;
+                if (this.k >= MATRIX_SIZE) {
+                    this.k = 0;
+                    this.j++;
+                }
+                if (this.j >= MATRIX_SIZE) {
+                    this.j = 0;
+                    this.i++;
+                }
+
+                if (this.i >= MATRIX_SIZE) {
+                    this.running = false;
+                }
+
+                this.draw();
+
+                if (this.running) {
+                    setTimeout(() => this.step(), 150);
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#1e1e1e';
+                ctx.fillRect(0, 0, 1200, 400);
+
+                // Draw dot product visualization
+                ctx.fillStyle = '#ce9178';
+                ctx.font = '24px monospace';
+                ctx.fillText('SIMD Register (4x f64)', PADDING, 30);
+
+                // Draw 4 parallel lanes
+                for (let lane = 0; lane < 4; lane++) {
+                    const y = 50 + lane * 80;
+                    const kIdx = this.k - 4 + lane;
+
+                    // Draw operation
+                    ctx.fillStyle = '#569cd6';
+                    ctx.fillRect(PADDING, y, CELL_SIZE, CELL_SIZE);
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '16px monospace';
+                    ctx.fillText(`a[${this.i}][${kIdx >= 0 ? kIdx : 0}]`, PADDING + 5, y + 25);
+
+                    ctx.fillStyle = '#d4d4d4';
+                    ctx.fillText('×', PADDING + CELL_SIZE + 10, y + 25);
+
+                    ctx.fillStyle = '#4ec9b0';
+                    ctx.fillRect(PADDING + CELL_SIZE + 40, y, CELL_SIZE, CELL_SIZE);
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(`b[${kIdx >= 0 ? kIdx : 0}][${this.j}]`, PADDING + CELL_SIZE + 45, y + 25);
+
+                    ctx.fillStyle = '#d4d4d4';
+                    ctx.fillText('=', PADDING + 2 * CELL_SIZE + 60, y + 25);
+
+                    ctx.fillStyle = '#dcdcaa';
+                    ctx.fillRect(PADDING + 2 * CELL_SIZE + 90, y, CELL_SIZE, CELL_SIZE);
+                }
+
+                ctx.fillStyle = '#4ec9b0';
+                ctx.font = '20px monospace';
+                ctx.fillText('All 4 operations happen SIMULTANEOUSLY!', PADDING, 400);
+
+                document.getElementById('ops').textContent = this.ops + ' (SIMD)';
+                document.getElementById('misses').textContent = Math.floor(this.ops / 4);
+            }
+        }
+
+        // Show naive by default
+        showViz('naive');
+    </script>
+</body>
+</html>

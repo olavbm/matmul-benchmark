@@ -1,5 +1,5 @@
-use matmul::{Matrix, naive_matmul, generate_test_matrices, dotprod_matmul_col_major_fast, unrolled_dotprod, 
-            blocked_matmul_default, blocked_matmul_optimized, blocked_matmul};
+use matmul::{Matrix, naive_matmul, generate_test_matrices, dotprod_matmul_col_major_fast, unrolled_dotprod,
+            blocked_matmul_optimized, blocked_matmul};
 use std::time::Instant;
 use std::env;
 
@@ -73,7 +73,7 @@ fn test_simple() {
     let naive_result = naive_matmul(&a, &b);
 
     // Expected: [[19,22],[43,50]]
-    let expected = vec![19.0, 22.0, 43.0, 50.0];
+    let expected = [19.0, 22.0, 43.0, 50.0];
     
     let naive_correct = (0..4).all(|i| (naive_result.get(i/2, i%2) - expected[i]).abs() < 1e-10);
 

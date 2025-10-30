@@ -155,17 +155,25 @@ impl Matrix {
     
     /// Extract a row as a vector
     pub fn get_row(&self, row: usize) -> Vec<f64> {
-        assert!(row < self.rows, "Row index out of bounds");
+        assert!(
+            row < self.rows,
+            "Row index {} out of bounds for {}×{} matrix (valid range: 0..{})",
+            row, self.rows, self.cols, self.rows
+        );
         let mut result = Vec::with_capacity(self.cols);
         for col in 0..self.cols {
             result.push(self.get(row, col));
         }
         result
     }
-    
+
     /// Extract a column as a vector
     pub fn get_col(&self, col: usize) -> Vec<f64> {
-        assert!(col < self.cols, "Column index out of bounds");
+        assert!(
+            col < self.cols,
+            "Column index {} out of bounds for {}×{} matrix (valid range: 0..{})",
+            col, self.rows, self.cols, self.cols
+        );
         let mut result = Vec::with_capacity(self.rows);
         for row in 0..self.rows {
             result.push(self.get(row, col));
