@@ -6,7 +6,7 @@ pub mod benchmark;
 pub mod implementations;
 pub mod dotprod;
 
-pub use matrix::Matrix;
+pub use matrix::{Matrix, MatrixOps, RowMajorMatrix, ColMajorMatrix};
 pub use test_data::*;
 pub use benchmark::*;
 pub use implementations::{

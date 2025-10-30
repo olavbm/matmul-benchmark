@@ -1,4 +1,4 @@
-use matmul::{Matrix, naive_matmul, generate_test_matrices, dotprod_matmul_col_major_fast, unrolled_dotprod,
+use matmul::{Matrix, MatrixOps, naive_matmul, generate_test_matrices, dotprod_matmul_col_major_fast, unrolled_dotprod,
             blocked_matmul_optimized, blocked_matmul};
 use std::time::Instant;
 use std::env;
@@ -53,10 +53,11 @@ fn main() {
     }
     
     println!("\n3. What you're seeing:");
-    println!("   - Matrix tracks memory layout (RowMajor/ColMajor)");
-    println!("   - Naive: Standard row×row access pattern");  
+    println!("   - RowMajorMatrix and ColMajorMatrix are separate types");
+    println!("   - Naive: Standard row×row access pattern");
     println!("   - Optimized: Converts B to column-major for better cache locality");
     println!("   - Performance difference shows impact of memory layout!");
+    println!("   - Type system ensures compile-time correctness!");
     println!("\n4. Run comprehensive benchmarks:");
     println!("   cargo +nightly bench");
     println!("\n5. Run scaling benchmark for plotting:");
@@ -67,8 +68,8 @@ fn main() {
 }
 
 fn test_simple() {
-    let a = Matrix::from_data_row_major(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
-    let b = Matrix::from_data_row_major(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
+    let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+    let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
     
     let naive_result = naive_matmul(&a, &b);
 
@@ -79,10 +80,10 @@ fn test_simple() {
 
     println!("  naive_matmul: {}", if naive_correct { "✓" } else { "✗" });
 
-    // Test state tracking
-    println!("  Matrix A is row-major: {}", a.is_row_major());
-    let b_col = b.to_col_major();
-    println!("  Matrix B converted to col-major: {}", b_col.is_col_major());
+    // Test layout conversion
+    println!("  Matrix A is RowMajorMatrix: true");
+    let _b_col = b.to_col_major();
+    println!("  Matrix B converted to ColMajorMatrix: true");
 }
 
 fn run_scaling_benchmark() {
