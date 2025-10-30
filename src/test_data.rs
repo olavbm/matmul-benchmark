@@ -46,24 +46,32 @@ pub fn generate_simple_test() -> TestData {
     TestData::with_expected(a, b, expected)
 }
 
+// Unused utility functions - kept for potential future use
+
+/// Generate test data multiplying matrix by identity.
+/// Currently unused but useful for correctness testing.
+#[allow(dead_code)]
 pub fn generate_identity_test(size: usize) -> TestData {
     let mut rng = StdRng::from_seed([123; 32]);
-    
+
     let a_data: Vec<f64> = (0..size * size)
         .map(|_| rng.gen_range(-10.0..10.0))
         .collect();
     let a = Matrix::from_data_row_major(a_data.clone(), size, size);
-    
+
     let mut identity = Matrix::new(size, size);
     for i in 0..size {
         identity.set(i, i, 1.0);
     }
-    
+
     TestData::with_expected(a.clone(), identity, a)
 }
 
 pub const EPSILON: f64 = 1e-10;
 
+/// Convenience wrapper for `matrices_equal_with_epsilon` with default epsilon.
+/// Currently unused; tests use `matrices_equal_with_epsilon` directly.
+#[allow(dead_code)]
 pub fn matrices_equal(a: &Matrix, b: &Matrix) -> bool {
     matrices_equal_with_epsilon(a, b, EPSILON)
 }

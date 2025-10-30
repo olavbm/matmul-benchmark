@@ -1,3 +1,31 @@
+//! Dot product implementations demonstrating progressive optimization techniques.
+//!
+//! This module shows the evolution from naive scalar implementation to SIMD-accelerated
+//! vectorization, serving as the performance kernel for matrix multiplication.
+//!
+//! ## Implementations
+//!
+//! 1. **`naive_dotprod`**: Scalar implementation with bounds checking
+//! 2. **`unrolled_dotprod`**: 4x loop unrolling for instruction-level parallelism
+//! 3. **`simd_dotprod`**: AVX2 vectorization processing 4 × f64 per instruction
+//!
+//! ## Performance (1024 elements)
+//!
+//! - Naive: 1,279ns (baseline)
+//! - Unrolled: 485ns (2.6x speedup)
+//! - SIMD: 271ns (4.7x speedup) - **beats nalgebra's 288ns!**
+//!
+//! ## SIMD Strategy
+//!
+//! AVX2 enables processing 256-bit registers = 4 × 64-bit f64 values in parallel.
+//! The implementation uses:
+//! - `_mm256_loadu_pd`: Load unaligned 4 × f64
+//! - `_mm256_mul_pd`: Multiply 4 pairs simultaneously
+//! - `_mm256_add_pd`: Accumulate products
+//! - Fallback to scalar for remainder elements (length % 4)
+//!
+//! Falls back to `unrolled_dotprod` on non-AVX2 systems.
+
 pub fn naive_dotprod(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len(), "Vector dimensions don't match");
     
