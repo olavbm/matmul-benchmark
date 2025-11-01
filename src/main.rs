@@ -1,6 +1,6 @@
 use matmul::{
     blocked_matmul, blocked_matmul_optimized, dotprod_matmul_col_major_fast,
-    generate_test_matrices, naive_matmul, unrolled_dotprod, Matrix, MatrixOps, TestData,
+    generate_test_matrices, naive_matmul, unrolled_dotprod, Matrix, MatrixOps,
 };
 use std::env;
 use std::time::Instant;

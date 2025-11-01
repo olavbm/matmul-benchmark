@@ -130,7 +130,7 @@ where
 ///
 /// # Example
 /// ```
-/// use matmul::{Matrix, naive_matmul};
+/// use matmul::{Matrix, MatrixOps, naive_matmul};
 /// let a = Matrix::from_data(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
 /// let b = Matrix::from_data(vec![5.0, 6.0, 7.0, 8.0], 2, 2);
 /// let c = naive_matmul(&a, &b);
