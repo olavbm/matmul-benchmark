@@ -568,15 +568,15 @@ mod tests {
     #[test]
     fn test_all_dotprod_implementations_match() {
         use crate::dotprod::unrolled_dotprod;
-        
+
         let a = Matrix::random(4, 3);
         let b = Matrix::random(3, 4);
-        
+
         let result1 = naive_matmul(&a, &b);
         let result2 = dotprod_matmul(&a, &b, unrolled_dotprod);
         let result3 = dotprod_matmul_fast(&a, &b, unrolled_dotprod);
         let result4 = dotprod_matmul_col_major_fast(&a, &b, unrolled_dotprod);
-        
+
         // All results should be identical
         for i in 0..result1.rows {
             for j in 0..result1.cols {
@@ -584,10 +584,65 @@ mod tests {
                 let r2 = result2.get(i, j);
                 let r3 = result3.get(i, j);
                 let r4 = result4.get(i, j);
-                
+
                 assert!((r1 - r2).abs() < 1e-10, "result1 vs result2 differ at ({}, {})", i, j);
                 assert!((r1 - r3).abs() < 1e-10, "result1 vs result3 differ at ({}, {})", i, j);
                 assert!((r1 - r4).abs() < 1e-10, "result1 vs result4 differ at ({}, {})", i, j);
+            }
+        }
+    }
+
+    /// Correctness test: Compare all implementations against nalgebra reference
+    #[test]
+    fn test_correctness_vs_nalgebra() {
+        use crate::dotprod::unrolled_dotprod;
+        use nalgebra::DMatrix;
+
+        // Helper to convert our Matrix to nalgebra DMatrix
+        fn to_dmatrix(mat: &Matrix) -> DMatrix<f64> {
+            let mut data = Vec::with_capacity(mat.rows * mat.cols);
+            for i in 0..mat.rows {
+                for j in 0..mat.cols {
+                    data.push(mat.get(i, j));
+                }
+            }
+            DMatrix::from_row_slice(mat.rows, mat.cols, &data)
+        }
+
+        // Test various sizes: small, medium, non-square
+        let test_cases = vec![
+            (8, 8),      // Small square
+            (16, 12),    // Small non-square
+            (32, 32),    // Medium square
+            (64, 48),    // Medium non-square
+        ];
+
+        for (rows, cols) in test_cases {
+            let a = Matrix::random(rows, cols);
+            let b = Matrix::random(cols, rows);
+
+            // Nalgebra reference
+            let na_result = to_dmatrix(&a) * to_dmatrix(&b);
+
+            // Test all our implementations
+            let implementations = vec![
+                ("naive", naive_matmul(&a, &b)),
+                ("blocked", blocked_matmul(&a, &b, 16)),
+                ("simd", simd_matmul(&a, &b)),
+                ("optimized", blocked_matmul_optimized(&a, &b, unrolled_dotprod)),
+            ];
+
+            for (name, result) in implementations {
+                for i in 0..result.rows {
+                    for j in 0..result.cols {
+                        let diff = (result.get(i, j) - na_result[(i, j)]).abs();
+                        assert!(
+                            diff < 1e-9,
+                            "{} differs from nalgebra at ({},{}): {} vs {} (diff: {}) for {}×{} × {}×{}",
+                            name, i, j, result.get(i, j), na_result[(i, j)], diff, rows, cols, cols, rows
+                        );
+                    }
+                }
             }
         }
     }
