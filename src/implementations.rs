@@ -26,7 +26,7 @@
 //! - **Performance cliffs** observed at L2/L3 boundaries (384×384, 512×512)
 
 use crate::{Matrix, MatrixOps};
-use crate::dotprod::simd_dotprod;
+use crate::dotprod::{fma_dotprod, simd_dotprod};
 
 /// Default block size optimized for L1d cache (37.3 KiB per core)
 /// A 64×64 block of f64 = 32 KiB, fits comfortably in L1d
@@ -278,11 +278,10 @@ where
     
     // Convert B to column-major for better cache locality
     let b_col_major = b.to_col_major();
-    
-    // Pre-allocate buffers for dotprod computation
+
+    // Pre-allocate buffer for row data (col buffers are now per-block)
     let max_block_size = block_size.min(a.cols.max(b.rows));
     let mut row_buf = vec![0.0; max_block_size];
-    let mut col_buf = vec![0.0; max_block_size];
     
     // Six-nested-loop cache-blocked algorithm with all optimizations
     for ii in (0..a.rows).step_by(block_size) {
@@ -294,19 +293,28 @@ where
                 let k_end = (kk + block_size).min(a.cols);
                 let k_size = k_end - kk;
                 
-                // Compute the block using all optimizations
+                // Pre-fill column buffers for this j-block (reused across all i)
+                // This is a 2D array: col_bufs[j][k] holds B's column j data
+                let mut col_bufs: Vec<Vec<f64>> = Vec::with_capacity(block_size);
+                for j in jj..j_end {
+                    let mut col_buf = vec![0.0; k_size];
+                    for (idx, k) in (kk..k_end).enumerate() {
+                        col_buf[idx] = b_col_major.get(k, j);
+                    }
+                    col_bufs.push(col_buf);
+                }
+
+                // Compute the block using optimized buffers
                 for i in ii..i_end {
                     // Fill row buffer for this row of A (sequential access)
                     for (idx, k) in (kk..k_end).enumerate() {
                         row_buf[idx] = a.get(i, k);
                     }
-                    
-                    for j in jj..j_end {
-                        // Fill column buffer from column-major B (sequential access!)
-                        for (idx, k) in (kk..k_end).enumerate() {
-                            col_buf[idx] = b_col_major.get(k, j);
-                        }
-                        
+
+                    for (j_idx, j) in (jj..j_end).enumerate() {
+                        // Reuse pre-filled column buffer!
+                        let col_buf = &col_bufs[j_idx];
+
                         // Compute optimized dot product and accumulate
                         let partial_sum = dotprod_fn(&row_buf[..k_size], &col_buf[..k_size]);
                         let current_value = result.get(i, j);
@@ -353,6 +361,21 @@ where
 /// ```
 pub fn simd_matmul(a: &Matrix, b: &Matrix) -> Matrix {
     blocked_matmul_col_major_fast(a, b, DEFAULT_BLOCK_SIZE, simd_dotprod)
+}
+
+/// FMA-accelerated matrix multiplication using fused multiply-add instructions.
+///
+/// Identical to `simd_matmul` but uses FMA (fused multiply-add) instead of
+/// separate multiply + add operations. FMA provides:
+/// - Single instruction for multiply-add (better throughput)
+/// - Better numerical accuracy (no intermediate rounding)
+/// - Reduced latency on modern CPUs
+///
+/// # Expected Performance
+/// - 10-20% faster than simd_matmul on CPUs with FMA support
+/// - Falls back to unrolled_dotprod on non-AVX2 systems
+pub fn fma_matmul(a: &Matrix, b: &Matrix) -> Matrix {
+    blocked_matmul_col_major_fast(a, b, DEFAULT_BLOCK_SIZE, fma_dotprod)
 }
 
 pub fn simd_blocked_matmul_optimized(a: &Matrix, b: &Matrix) -> Matrix {
