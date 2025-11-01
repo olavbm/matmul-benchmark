@@ -6,4 +6,14 @@ speedup_analysis.png
 scaling_analysis.png
 scaling_data.txt
 scaling_stats*.txt
-plot_scaling.py
+
+# Python artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Generated visualization media
+visualization/media/
