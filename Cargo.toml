@@ -15,17 +15,55 @@ path = "src/main.rs"
 name = "matmul"
 path = "src/lib.rs"
 
+[[bench]]
+name = "naive_64"
+harness = false
+
+[[bench]]
+name = "naive_128"
+harness = false
+
+[[bench]]
+name = "blocked_64"
+harness = false
+
+[[bench]]
+name = "blocked_128"
+harness = false
+
+[[bench]]
+name = "simd_64"
+harness = false
+
+[[bench]]
+name = "simd_128"
+harness = false
+
+[[bench]]
+name = "nalgebra_64"
+harness = false
+
+[[bench]]
+name = "nalgebra_128"
+harness = false
+
+[[bench]]
+name = "simd_dotprod_128"
+harness = false
+
+[[bench]]
+name = "fma_dotprod_128"
+harness = false
+
 [dependencies]
 rand = "0.8"
 nalgebra = "0.32"
 
 [dev-dependencies]
+criterion = "0.7.0"
 
 [profile.release]
 lto = true
 codegen-units = 1
 panic = "abort"
 
-[profile.bench]
-lto = true
-codegen-units = 1
