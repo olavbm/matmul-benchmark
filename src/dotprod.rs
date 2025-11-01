@@ -28,7 +28,7 @@
 
 pub fn naive_dotprod(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len(), "Vector dimensions don't match");
-    
+
     let mut sum = 0.0;
     for i in 0..a.len() {
         sum += a[i] * b[i];
@@ -38,10 +38,10 @@ pub fn naive_dotprod(a: &[f64], b: &[f64]) -> f64 {
 
 pub fn unrolled_dotprod(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len(), "Vector dimensions don't match");
-    
+
     let len = a.len();
     let mut sum = 0.0;
-    
+
     let chunks = len / 4;
 
     for i in 0..chunks {
@@ -51,18 +51,18 @@ pub fn unrolled_dotprod(a: &[f64], b: &[f64]) -> f64 {
             + a[base + 2] * b[base + 2]
             + a[base + 3] * b[base + 3];
     }
-    
+
     for i in (chunks * 4)..len {
         sum += a[i] * b[i];
     }
-    
+
     sum
 }
 
 #[cfg(target_arch = "x86_64")]
 pub fn simd_dotprod(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len(), "Vector dimensions don't match");
-    
+
     #[cfg(target_feature = "avx2")]
     unsafe {
         simd_dotprod_avx2(a, b)
@@ -77,12 +77,12 @@ pub fn simd_dotprod(a: &[f64], b: &[f64]) -> f64 {
 #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
 unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
     use std::arch::x86_64::*;
-    
+
     let len = a.len();
     let simd_len = len & !3; // Round down to multiple of 4
-    
+
     let mut sum_vec = _mm256_setzero_pd();
-    
+
     // Process 4 f64 elements at a time with AVX2
     for i in (0..simd_len).step_by(4) {
         let a_vec = _mm256_loadu_pd(a.as_ptr().add(i));
@@ -90,22 +90,74 @@ unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
         let prod = _mm256_mul_pd(a_vec, b_vec);
         sum_vec = _mm256_add_pd(sum_vec, prod);
     }
-    
+
     // Sum the 4 elements of sum_vec
     let mut sum_arr = [0.0; 4];
     _mm256_storeu_pd(sum_arr.as_mut_ptr(), sum_vec);
     let mut sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
-    
+
     // Handle remaining elements
     for i in simd_len..len {
         sum += a[i] * b[i];
     }
-    
+
+    sum
+}
+
+/// FMA-optimized dot product using fused multiply-add
+#[cfg(target_arch = "x86_64")]
+pub fn fma_dotprod(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len(), "Vector dimensions don't match");
+
+    #[cfg(target_feature = "avx2")]
+    unsafe {
+        fma_dotprod_avx2(a, b)
+    }
+    #[cfg(not(target_feature = "avx2"))]
+    {
+        // Fallback to unrolled version
+        unrolled_dotprod(a, b)
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+unsafe fn fma_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::*;
+
+    let len = a.len();
+    let simd_len = len & !3; // Round down to multiple of 4
+
+    let mut sum_vec = _mm256_setzero_pd();
+
+    // Process 4 f64 elements at a time with FMA
+    for i in (0..simd_len).step_by(4) {
+        let a_vec = _mm256_loadu_pd(a.as_ptr().add(i));
+        let b_vec = _mm256_loadu_pd(b.as_ptr().add(i));
+        // FMA: sum_vec = (a_vec * b_vec) + sum_vec
+        sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
+    }
+
+    // Sum the 4 elements of sum_vec
+    let mut sum_arr = [0.0; 4];
+    _mm256_storeu_pd(sum_arr.as_mut_ptr(), sum_vec);
+    let mut sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3];
+
+    // Handle remaining elements
+    for i in simd_len..len {
+        sum += a[i] * b[i];
+    }
+
     sum
 }
 
 #[cfg(not(target_arch = "x86_64"))]
 pub fn simd_dotprod(a: &[f64], b: &[f64]) -> f64 {
+    // Fallback for non-x86_64 architectures
+    unrolled_dotprod(a, b)
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn fma_dotprod(a: &[f64], b: &[f64]) -> f64 {
     // Fallback for non-x86_64 architectures
     unrolled_dotprod(a, b)
 }
@@ -134,10 +186,10 @@ mod tests {
     fn test_both_implementations_match() {
         let a = vec![1.5, -2.0, 3.7, 0.5, -1.2, 4.1];
         let b = vec![2.1, 1.0, -0.5, 3.2, 2.7, -1.8];
-        
+
         let naive_result = naive_dotprod(&a, &b);
         let unrolled_result = unrolled_dotprod(&a, &b);
-        
+
         assert!((naive_result - unrolled_result).abs() < 1e-10);
     }
 
@@ -153,11 +205,10 @@ mod tests {
     fn test_simd_dotprod() {
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let b = vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-        
+
         let simd_result = simd_dotprod(&a, &b);
         let naive_result = naive_dotprod(&a, &b);
-        
+
         assert!((simd_result - naive_result).abs() < 1e-10);
     }
-
 }
