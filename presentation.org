@@ -32,7 +32,6 @@ We can do better.
                   
 [ 5 3 1 ]
          
-         
 * What is Matrix Multiplication?
 ** Scalars
 ** Vectors
@@ -67,7 +66,8 @@ manim!
 * What is Matrix Multiplication?
 ** Lots of mul and add
 ** Memory Access
-** Highly parallelizable 
+** Highly parallelizable
+** Algorithmic complexity
 
 * What is Matrix Multiplication?
 ** Lots of mul and add
@@ -75,11 +75,12 @@ manim!
 Read heavy!
 ** Highly parallelizable 
 Each resulting C[i][j] can be computed separately!
+** Algorithmic complexity
+O(n^3)
 
 * Starting Point: Naive Implementation
 
 #+BEGIN_SRC rust
-// Naive implementation - O(n³)
 // Square n*n matrices
 for i in 0..n {
     for j in 0..n {
@@ -98,31 +99,86 @@ for i in 0..n {
 - Instruction Pipeline
   - Pipeline stalls on dependencies, branches, cache misses
 
+* Constraints
+** Memory Constraints
+- Fast CPU
+- Slow memory
+  
+- Memory Layout
+  - L1d cache (~4 cycles latency)
+  - L2 cache (~12 cycles latency)
+  - L3 cache (~40 cycles latency)
+  - RAM ~100-300 cycles latency)
+* Constraints
+** Memory layout
+ [[ 1 2 ]
+  [ 3 4] ]
+
+* Constraints
+** Memory layout
+ [[ 1 2 ]
+  [ 3 4] ]
+
+Row major
+[1 2 3 4]
+
+* Constraints
+** Memory layout
+ [[ 1 2 ]
+  [ 3 4] ]
+
+Row major
+[1 2 3 4]
+
+Column major
+[1 3 2 4]
+
+* Constraints
+** Cache lines
+Load 64 bytes at a time (8× f64)
+** Maybe more manim(!!)
+* Constraints
+** Our goal
+*** Maximize data reuse
+*** Minimize memory traffic
+*** Keep ALUs fed
 * The Journey from Naive to Optimized
 
 Four key optimization strategies:
 
-1. *Column-major layout* - Fix cache locality
-2. *Cache blocking (tiling)* - Fit data in L1 cache
-3. *SIMD vectorization* - Process 4 numbers at once
-4. *Performance profiling* - Find and fix hidden bottlenecks
-
-*Result*: 17.5x speedup on 512×512 matrices (11.36s → 0.65s)
+1. Column-major layout - Fix cache locality
+2. Cache blocking (tiling) - Fit data in L1 cache
+3. SIMD vectorization - Process 4 numbers at once
+4. Performance profiling - Find and fix hidden bottlenecks
 
 * Live Demo: Naive Performance
 
 #+BEGIN_SRC sh :results output :exports both
 cd /home/olav/dev/rust/matmul
-cargo run --release -- --scaling 1
+
+cargo +nightly bench --bench naive_128
+
 #+END_SRC
 
 #+RESULTS:
+: naive_128               time:   [2.3137 ms 2.3175 ms 2.3213 ms]
+:                         change: [+1.4671% +1.6416% +1.8169%] (p = 0.00 < 0.05)
+:                         Performance has regressed.
+: 
 
 * Strategy 1: Column-Major Layout
 
-*Problem*: Row-major matrix B accessed by columns → cache disaster
+** Problem:
+Row-major matrix B accessed by columns → cache disaster
+** Solution:
+Store matrix in column-major order for efficient column access
 
-*Solution*: Store matrix in column-major order for efficient column access
+* Strategy 1: Column-Major Layout
+
+** Problem:
+Row-major matrix B accessed by columns → cache disaster
+** Solution:
+Store matrix in column-major order for efficient column access
 
 #+BEGIN_SRC rust :exports code
 // Now accessing B by columns is cache-friendly!
@@ -135,30 +191,67 @@ for i in 0..n {
 }
 #+END_SRC
 
-*Impact*: Reduces L1 cache misses from 48% to ~10%
-
 * Strategy 2: Cache Blocking (Tiling)
 
-*Cache blocking* - the 6-nested loop algorithm:
+Cache blocking - the 6-nested loop algorithm:
 - 3 outer loops iterate over blocks
 - 3 inner loops compute within blocks
 - Split matrices into 64×64 blocks (32KB fits in L1d: 37KB)
 - Process blocks instead of full rows/columns
 - Reuse data while it's still in cache
 
-*Implementation*: See `blocked_matmul()` in `src/implementations.rs`
-
 * Block Size Analysis
 
 #+BEGIN_SRC sh :results output :exports both
 cd /home/olav/dev/rust/matmul
-cargo run --release -- --blocked 2>&1 | head -20
+cargo run --release --bin matmul -- --blocked
 #+END_SRC
 
-*Hardware constraints*:
-- *L1d*: 37 KB per core → 64×64 blocks optimal
-- *L2*: 1.5 MB per core → crossover at ~384×384
-- *L3*: 18 MB shared → dramatic speedup at 512×512+
+#+RESULTS:
+#+begin_example
+Blocked Matrix Multiplication Comparison
+size,algorithm,block_size,time_ns,gflops
+256,naive,0,24233658,1.384621
+256,optimized,0,13479549,2.489284
+256,blocked,32,18253015,1.838295
+256,blocked,48,17011042,1.972509
+256,blocked,64,20912923,1.604483
+256,blocked,96,20753875,1.616779
+256,blocked,128,19576060,1.714054
+256,blocked_ultimate,64,9434899,3.556417
+512,naive,0,557058558,0.481880
+512,optimized,0,105669088,2.540340
+512,blocked,32,147348918,1.821767
+512,blocked,48,147408844,1.821027
+512,blocked,64,183439190,1.463348
+512,blocked,96,182888670,1.467753
+512,blocked,128,174111424,1.541745
+512,blocked_ultimate,64,74898344,3.583997
+768,naive,0,1530656653,0.591883
+768,optimized,0,357349543,2.535248
+768,blocked,32,479525662,1.889304
+768,blocked,48,512926613,1.766275
+768,blocked,64,542397196,1.670307
+768,blocked,96,613639509,1.476387
+768,blocked,128,583112422,1.553679
+768,blocked_ultimate,64,248575943,3.644639
+1024,naive,0,4736583120,0.453382
+1024,optimized,0,854573451,2.512930
+1024,blocked,32,1191180442,1.802820
+1024,blocked,48,1229022280,1.747311
+1024,blocked,64,1322480954,1.623830
+1024,blocked,96,1458849133,1.472040
+1024,blocked,128,1381641902,1.554298
+1024,blocked_ultimate,64,614751652,3.493254
+#+end_example
+
+    Size    | Naive  | Optimized | Best Blocked | blocked_ultimate
+  --------|--------|-----------|--------------|------------------
+  256×256 | 1.27   | 2.49      | 1.83 (b=32)  | 3.46
+  512×512 | 0.49   | 2.50      | 1.86 (b=32)  | 3.66
+  768×768 | 0.60   | 2.56      | 1.92 (b=32)  | 3.60
+  1024²   | 0.47   | 2.56      | 1.83 (b=32)  | 3.69
+
 
 * Strategy 3: SIMD Vectorization
 
@@ -210,6 +303,7 @@ Watch how L1 miss rate drops:
 - Blocked: ~46% (helps L3, not L1)
 - SIMD: ~8% (column-major fixes it)
 - Optimized: ~2% (near perfect!)
+  
 
 * The Smoking Gun: 49% Overhead
 
@@ -288,42 +382,6 @@ cd /home/olav/dev/rust/matmul
 cargo run --release -- --scaling 1 | grep -E "(16x16|128x128|512x512|1024x1024)" | head -12
 #+END_SRC
 
-* Hardware Constraints
-
-- *L1d*: 37 KB per core → 64×64 blocks optimal
-- *L2*: 1.5 MB per core → performance crossover at ~384×384
-- *L3*: 18 MB shared → dramatic speedup at 512×512+
-
-* Performance Visualization
-
-#+BEGIN_SRC sh :results file :file performance.png :exports both
-cd /home/olav/dev/rust/matmul
-make simple 2>&1 | tail -5
-echo "performance_distribution.png"
-#+END_SRC
-
-* Try Different Matrix Sizes
-
-#+BEGIN_SRC sh :results output :exports both
-cd /home/olav/dev/rust/matmul
-# Change the size here and re-run!
-SIZE=256
-cargo run --release -- --scaling 1 | grep "${SIZE}x${SIZE}" | head -3
-#+END_SRC
-
-* Compare Specific Algorithms
-
-#+BEGIN_SRC sh :results output :exports both
-cd /home/olav/dev/rust/matmul
-# Benchmarks organized into categories: mm (matrix mult), simd, vector_dotprod
-cargo +nightly bench simd 2>&1 | grep "test benches::" | head -5
-#+END_SRC
-
-*Organized benchmarks*: Easy to run just what you need!
-- `cargo bench vector_dotprod` - Pure dot product comparison
-- `cargo bench mm` - Matrix multiplication algorithms
-- `cargo bench simd` - SIMD-accelerated variants
-
 * Why GPUs Excel at Matrix Multiplication
 
 *Massive parallelism*: While CPUs have 4-16 cores, GPUs have thousands of cores
@@ -362,28 +420,8 @@ Theoretical speedup for 1024×1024:
 | Naive CPU      | ~2400ms     | 1x               |
 | Our SIMD       | 463ms       | *5.2x*           |
 | GPU (OpenCL)   | ~50-100ms   | *24-48x*         |
-| GPU (CUDA)     | ~10-20ms    | *120-240x*       |
 
 *Note*: GPU shines for large matrices (>1024×1024), smaller sizes suffer from transfer overhead
-
-* Live Demo: GPU Setup
-
-#+BEGIN_SRC sh :results output :exports both
-# Check if we have GPU compute available
-if command -v clinfo >/dev/null 2>&1; then
-    echo "OpenCL Status:"
-    clinfo -l 2>/dev/null || echo "OpenCL runtime needs installation"
-else
-    echo "Install OpenCL: sudo apt install clinfo ocl-icd-opencl-dev intel-opencl-icd"
-fi
-
-# Check ArrayFire availability
-if cargo tree 2>/dev/null | grep -q arrayfire; then
-    echo -e "\nArrayFire: Installed ✓"
-else
-    echo -e "\nTo add GPU support: cargo add arrayfire"
-fi
-#+END_SRC
 
 * What We Learned
 
