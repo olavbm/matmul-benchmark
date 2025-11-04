@@ -91,6 +91,13 @@ for i in 0..n {
 #+END_SRC
 
 *The problem*: `b[k][j]` causes cache misses - jumping across rows in memory!
+* Constraints
+** Compute Constraints
+- Multiple ALUs (compute units) per core
+  - Can do ~2-4 operations per cycle (mul + add)
+- Instruction Pipeline
+  - Pipeline stalls on dependencies, branches, cache misses
+
 * The Journey from Naive to Optimized
 
 Four key optimization strategies:
