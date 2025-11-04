@@ -11,7 +11,7 @@ fn benchmark_blocked_128(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().measurement_time(std::time::Duration::from_secs(10));
+    config = Criterion::default().measurement_time(std::time::Duration::from_secs(3));
     targets = benchmark_blocked_128
 }
 criterion_main!(benches);
