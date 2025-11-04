@@ -17,3 +17,8 @@ __pycache__/
 
 # Generated visualization media
 visualization/media/
+media/
+
+# Misc generated files
+*.png
+!arrayfire_demo/**/*.png

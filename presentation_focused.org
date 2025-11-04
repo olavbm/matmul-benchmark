@@ -1,0 +1,264 @@
+#+TITLE: The Hunt for 49% Overhead: A Matrix Multiplication Detective Story
+#+AUTHOR: Olav
+#+DATE: 2025-11-05
+#+STARTUP: overview
+#+OPTIONS: toc:nil num:nil
+
+* The Mystery
+
+I optimized my matrix multiplication code with every trick I knew:
+- ✅ Cache blocking for L1 locality
+- ✅ SIMD vectorization (AVX2)
+- ✅ Column-major memory layout
+
+*Result*: 7.7× faster than naive... but still felt slow.
+
+*Something was wrong.*
+
+* What is Matrix Multiplication?
+
+Quick reminder:
+
+#+BEGIN_SRC rust
+// Square n*n matrices
+for i in 0..n {
+    for j in 0..n {
+        for k in 0..n {
+            c[i][j] += a[i][k] * b[k][j];
+        }
+    }
+}
+#+END_SRC
+
+*The problem*: ~b[k][j]~ jumps around memory (cache misses!)
+
+For 512×512 matrices: *268 million operations*
+
+* The Naive Baseline
+
+512×512 matrices (20 iterations):
+- Time: 11.36 seconds
+- L1 cache miss rate: *48.5%* 💥
+
+Nearly half of all memory accesses miss L1 cache!
+
+* Optimization #1: Cache Blocking
+
+Split into 64×64 blocks (fits in L1d cache: 37KB)
+
+#+BEGIN_SRC rust
+// 6-nested loop algorithm
+for ii in (0..n).step_by(64) {
+    for jj in (0..n).step_by(64) {
+        for kk in (0..n).step_by(64) {
+            // Process 64×64 sub-blocks
+            for i in ii..(ii+64) {
+                for j in jj..(jj+64) {
+                    for k in kk..(kk+64) {
+                        c[i][j] += a[i][k] * b[k][j];
+                    }
+                }
+            }
+        }
+    }
+}
+#+END_SRC
+
+*Result*: 11.36s → 3.04s (*3.7× speedup*)
+
+But L1 miss rate still 45.8%... 🤔
+
+* Optimization #2: SIMD Vectorization
+
+AVX2: Process 4× f64 values in parallel
+
+#+BEGIN_SRC rust
+unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
+    let mut sum_vec = _mm256_setzero_pd();
+    for i in (0..len).step_by(4) {
+        let a_vec = _mm256_loadu_pd(a.as_ptr().add(i));
+        let b_vec = _mm256_loadu_pd(b.as_ptr().add(i));
+        sum_vec = _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec));
+    }
+    // Sum 4 elements + handle remainder
+}
+#+END_SRC
+
+*Result*: 3.04s → 1.49s (*7.7× total speedup*)
+
+L1 miss rate: 8.5% (much better!)
+
+* The Nagging Feeling
+
+7.7× speedup sounds great... but:
+- nalgebra (production library): 0.21s
+- Our SIMD code: 1.49s
+- Gap: *7× slower*
+
+And I couldn't shake the feeling something was wasteful.
+
+*Time to profile properly.*
+
+* The Smoking Gun: perf stat
+
+#+BEGIN_SRC sh
+perf stat -d ./matmul_simd
+#+END_SRC
+
+Key metrics:
+| Metric | Value |
+|--------|-------|
+| Time | 1.49s |
+| Instructions | 13.6 billion |
+| Cycles | 8.2 billion |
+| *Backend Bound* | *49.3%* |
+
+*49% of execution time doing... what exactly?*
+
+* Deep Dive: perf record
+
+#+BEGIN_SRC sh
+perf record -g ./matmul_simd
+perf report
+#+END_SRC
+
+Hotspot: ~fill_col_buf()~ consuming 49% of samples
+
+*Wait... why is column buffer filling so expensive?*
+
+* The Bug
+
+#+BEGIN_SRC rust
+// BUGGY CODE
+for i in ii..i_end {               // 64 iterations
+    fill_row_buf(i);               // Load A row: 64 elements
+    for j in jj..j_end {           // 64 iterations
+        fill_col_buf(j);           // ← LOADED 64 TIMES!
+        dotprod(row_buf, col_buf); // 64 elements
+    }
+}
+#+END_SRC
+
+*Column buffer filled once per (i,j) pair instead of once per j!*
+
+- Should fill: 64 column buffers (once each)
+- Actually filled: 64 × 64 = *4,096 times*
+
+Per 64×64 block: 262,144 redundant fills!
+
+* The Fix
+
+#+BEGIN_SRC rust
+// FIXED CODE
+// Pre-fill ALL column buffers once per j-block
+let col_bufs = prefill_all_columns(jj..j_end);  // 64 buffers
+
+for i in ii..i_end {
+    fill_row_buf(i);
+    for j in jj..j_end {
+        let col_buf = &col_bufs[j - jj];  // ← REUSE!
+        dotprod(row_buf, col_buf);
+    }
+}
+#+END_SRC
+
+Simple change: hoist column buffer prep outside inner loop.
+
+* The Results
+
+512×512 matrices (20 iterations):
+
+| Implementation | Time | L1 Miss Rate | Speedup |
+|----------------|------|--------------|---------|
+| Naive | 11.36s | 48.5% 💥 | 1.0× |
+| Blocked | 3.04s | 45.8% | 3.7× |
+| SIMD | 1.49s | 8.5% | 7.7× |
+| *Fixed* | *0.65s* | *2.2%* ✅ | *17.5×* |
+| nalgebra | 0.21s | 2.8% | 54× |
+
+*2.3× speedup from one algorithmic fix!*
+
+- Instructions: 13.6B → 4.8B (2.8× fewer)
+- L1 misses: 10.1% → 2.2% (4.6× better)
+- Backend bound: 49% → 21%
+
+* What Didn't Work
+
+Before profiling, we tried *FMA* (fused multiply-add):
+
+#+BEGIN_SRC rust
+// Instead of separate multiply + add
+sum_vec = _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec));
+
+// Use single FMA instruction
+sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
+#+END_SRC
+
+*Result*: 1.49s → 1.49s (*0% improvement!*)
+
+*Why?* Not bottlenecked by arithmetic. Real problem was algorithmic.
+
+* Lessons Learned
+
+1. *Profile first, optimize second*
+   - FMA: 0% gain (guessing)
+   - Buffer reuse: 130% gain (profiling)
+
+2. *Hardware counters tell the truth*
+   - "Backend Bound: 49%" = find where CPU stalls
+   - L1 miss rate = memory access patterns
+
+3. *Algorithmic > Instruction-level*
+   - Fancy SIMD intrinsics: useful but not magic
+   - Removing redundant work: always wins
+
+4. *Good intuition comes from measurement*
+   - "Felt slow" → profiling → found 49% waste
+   - Trust your gut, but verify with data
+
+* The Gap Remains
+
+We're still 3× slower than nalgebra (0.65s vs 0.21s).
+
+*Why?*
+- They do *6.8× fewer L1 loads* (265M vs 1.8B)
+- Register tiling (keep 4×4 blocks in CPU registers)
+- Micro-kernels (no intermediate buffers)
+- Matrix packing (optimize layout once)
+
+*But*: Our dot product *beats* nalgebra: 271ns vs 288ns!
+
+Sometimes you win the battle but not the war.
+
+* Key Takeaway
+
+#+BEGIN_QUOTE
+*"Don't guess. Profile first, then optimize what actually matters."*
+
+The 49% overhead was invisible without ~perf~.
+FMA seemed promising but gave 0%.
+The real win came from understanding the bottleneck.
+#+END_QUOTE
+
+* Code & Resources
+
+GitHub: https://github.com/yourusername/matmul (replace with actual)
+
+Key files:
+- ~src/implementations.rs~ - naive → blocked → SIMD → optimized
+- ~src/dotprod.rs~ - dot product variants
+- ~compare_perf.sh~ - perf profiling script
+
+Try it yourself:
+#+BEGIN_SRC sh
+cargo +nightly bench
+./compare_perf.sh 512 cache
+#+END_SRC
+
+* Questions?
+
+Happy to discuss:
+- Cache optimization techniques
+- SIMD programming
+- Performance profiling workflows
+- Why nalgebra is still 3× faster!
