@@ -8,59 +8,99 @@
 
 High-Performance Matrix Multiplication in Rust
 
-* Introduction
-
-+High-Performance Matrix Multiplication in Rust+
-How CPUs work - a Rust perspective
-
 * Why Matrix Multiplication Matters
-
-Matrix multiplication is *everywhere** in modern computing:
-
+Matrix multiplication is *everywhere* in modern computing:
 - *Your screen right now*: Graphics transforms
-- *Scrolling*: 2D transform matrices
+- *DOM rendering*: 2D transform matrices
 - *Video playback*: FT, compression/decompression
 - *AI/ML inference*: neural network layers
-- *Physics simulations*: Rigid body dynamics, finite element analysis
-- *Audio processing*: FT, Digital signal processing, equalizers, spatial audio
+- *Audio processing*: FT, digital signal processing, equalizers, spatial audio
 
 *The bottleneck*: CPUs perform ~10⁹ operations/second, but naive matmul is naive
 
 We can do better.
+* What is Matrix Multiplication?
+** Scalars
+5 * 3 = 15
 
-* The Challenge
+* What is Matrix Multiplication?
+** Scalars
+** Vectors
 
-#+BEGIN_QUOTE
-"A 1024×1024 matrix multiplication requires 2.1 billion floating point operations.
+         
+         
+                  
+[ 5 3 1 ]
+         
+         
+* What is Matrix Multiplication?
+** Scalars
+** Vectors
 
-Your CPU can theoretically do this in ~2 seconds.
+         [ 2
+           6
+           1 ]        
+[ 5 3 1 ] = [ 5 * 2
+            + 3 * 6
+            + 1 * 1 ]
+          = 29
+* What is Matrix Multiplication?
+** Scalars
+** Vectors
 
-A naive implementation takes *minutes*. Why?"
-#+END_QUOTE
+         [ 2
+           6
+           1 ]        
+[ 5 3 1 ] = [ 5 * 2
+            + 3 * 6
+            + 1 * 1 ]
+          = 29
+          
+Also called the dot product.
 
-* The Journey from Naive to SIMD
+* What is Matrix Multiplication?
+** Scalars
+** Vectors
+** Matrices
+manim!
 
-- Started with basic O(n³) implementation (simple but slow)
-- Applied cache optimization techniques (64×64 blocking for L1d cache)
-- Integrated SIMD vectorization (AVX2 - 4x f64 parallelism)
-- Refactored for clarity with macros and documentation
-- Achieved competitive performance with hand-tuned libraries
+* What is Matrix Multiplication?
+** Lots of mul and add
+** Memory Access
+** Highly parallelizable 
 
-*Result*: 5.2x speedup on 1024×1024 matrices
-*Bonus*: We beat nalgebra's dot product! (271ns vs 288ns)
+* What is Matrix Multiplication?
+** Lots of mul and add
+** Memory Access
+Read heavy!
+** Highly parallelizable 
+Each resulting C[i][j] can be computed separately!
 
-* Cache Misses Kill Performance
+* Starting Point: Naive Implementation
 
-#+BEGIN_SRC rust :exports both
-// Naive implementation - poor cache locality
+#+BEGIN_SRC rust
+// Naive implementation - O(n³)
+// Square n*n matrices
 for i in 0..n {
     for j in 0..n {
         for k in 0..n {
-            c[i][j] += a[i][k] * b[k][j];  // b[k][j] = cache miss!
+            c[i][j] += a[i][k] * b[k][j];
         }
     }
 }
 #+END_SRC
+
+*The problem*: `b[k][j]` causes cache misses - jumping across rows in memory!
+* The Journey from Naive to Optimized
+
+Four key optimization strategies:
+
+1. *Column-major layout* - Fix cache locality
+2. *Cache blocking (tiling)* - Fit data in L1 cache
+3. *SIMD vectorization* - Process 4 numbers at once
+4. *Performance profiling* - Find and fix hidden bottlenecks
+
+*Result*: 17.5x speedup on 512×512 matrices (11.36s → 0.65s)
 
 * Live Demo: Naive Performance
 
@@ -71,7 +111,26 @@ cargo run --release -- --scaling 1
 
 #+RESULTS:
 
-* Divide and Conquer for Cache
+* Strategy 1: Column-Major Layout
+
+*Problem*: Row-major matrix B accessed by columns → cache disaster
+
+*Solution*: Store matrix in column-major order for efficient column access
+
+#+BEGIN_SRC rust :exports code
+// Now accessing B by columns is cache-friendly!
+for i in 0..n {
+    for j in 0..n {
+        for k in 0..n {
+            c[i][j] += a[i][k] * b_col_major[j][k];  // Sequential!
+        }
+    }
+}
+#+END_SRC
+
+*Impact*: Reduces L1 cache misses from 48% to ~10%
+
+* Strategy 2: Cache Blocking (Tiling)
 
 *Cache blocking* - the 6-nested loop algorithm:
 - 3 outer loops iterate over blocks
@@ -81,7 +140,6 @@ cargo run --release -- --scaling 1
 - Reuse data while it's still in cache
 
 *Implementation*: See `blocked_matmul()` in `src/implementations.rs`
-Now with proper documentation and configurable block size constant!
 
 * Block Size Analysis
 
@@ -90,7 +148,14 @@ cd /home/olav/dev/rust/matmul
 cargo run --release -- --blocked 2>&1 | head -20
 #+END_SRC
 
-* Process 4 Numbers at Once
+*Hardware constraints*:
+- *L1d*: 37 KB per core → 64×64 blocks optimal
+- *L2*: 1.5 MB per core → crossover at ~384×384
+- *L3*: 18 MB shared → dramatic speedup at 512×512+
+
+* Strategy 3: SIMD Vectorization
+
+*AVX2*: Process 4 double-precision floats in parallel
 
 #+BEGIN_SRC rust :exports code
 // AVX2: 4x f64 elements in parallel
@@ -105,23 +170,109 @@ unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
 }
 #+END_SRC
 
-* Dot Product Benchmark: We Beat nalgebra!
+*Benefit*: 4x computational throughput (when not memory-bound)
+
+* Strategy 4: Performance Profiling with perf
+
+Using hardware performance counters to find the *real* bottleneck:
+
+#+BEGIN_SRC sh
+./profile.sh simd 512 stat    # Basic performance stats
+./profile.sh simd 512 cache   # Detailed cache analysis
+./compare_perf.sh 512 cache   # Compare all implementations
+#+END_SRC
+
+*Key metrics*:
+- L1 dcache load misses (cache locality)
+- Instructions per cycle (IPC)
+- Memory Bound vs Core Bound (what's limiting us?)
+- Retiring percentage (useful work vs stalls)
+
+*Discovery*: SIMD was doing 13.6B instructions but nalgebra only 1.5B!
+
+* Live Demo: Profiling Comparison
 
 #+BEGIN_SRC sh :results output :exports both
 cd /home/olav/dev/rust/matmul
-# Run just the vector dotprod benchmarks (organized with macros!)
-cargo +nightly bench vector_dotprod 2>&1 | grep "test benches::" | tail -8
+# Compare cache behavior of all implementations
+./compare_perf.sh 128 cache 2>&1 | grep -E "(Profiling|Time:|L1-dcache-load-misses)" | head -20
 #+END_SRC
 
-*Clean benchmark organization*: 60+ benchmarks now generated from 5 macros!
+Watch how L1 miss rate drops:
+- Naive: ~48% (cache catastrophe)
+- Blocked: ~46% (helps L3, not L1)
+- SIMD: ~8% (column-major fixes it)
+- Optimized: ~2% (near perfect!)
+
+* The Smoking Gun: 49% Overhead
+
+Perf profiling revealed we were spending 49% of execution time on *redundant work*:
+
+#+BEGIN_SRC rust
+for i in ii..i_end {
+    fill_row_buf(i);           // Load A data: 4,096 elements
+    for j in jj..j_end {
+        fill_col_buf(j);       // ← PROBLEM: Loaded 4,096 times!
+        dotprod(row_buf, col_buf);
+    }
+}
+#+END_SRC
+
+*The bug*: Column buffer filled once per (i,j) pair instead of once per j
+*Result*: 262,144 redundant buffer fills per 64×64 block
+
+* The Fix: Reuse Column Buffers
+
+#+BEGIN_SRC rust
+// Pre-fill ALL column buffers once
+let col_bufs = prefill_all_columns(jj..j_end);  // 64 buffers
+
+for i in ii..i_end {
+    fill_row_buf(i);
+    for j in jj..j_end {
+        let col_buf = &col_bufs[j];  // ← REUSE!
+        dotprod(row_buf, col_buf);
+    }
+}
+#+END_SRC
+
+*Impact*:
+- Time: 1.49s → 0.65s (*2.3x speedup*)
+- Instructions: 13.6B → 4.8B (*2.8x fewer*)
+- L1 miss rate: 10.1% → 2.2% (*4.6x better*)
+
+* What Didn't Work: FMA Instructions
+
+Before profiling, we tried *FMA* (fused multiply-add) - single instruction for multiply+add:
+
+#+BEGIN_SRC rust
+// SIMD: separate multiply + add
+let prod = _mm256_mul_pd(a_vec, b_vec);
+sum_vec = _mm256_add_pd(sum_vec, prod);
+
+// FMA: fused multiply-add (faster, right?)
+sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
+#+END_SRC
+
+*Result*: 1.49s → 1.49s (*0% improvement!*)
+
+*Why?* We weren't bottlenecked by multiply-add operations. The real problem was algorithmic (redundant buffer fills).
+
+*Lesson*: Don't guess! Profile first, then optimize what actually matters.
 
 * Performance Comparison: The Numbers
 
-| Matrix Size | Naive    | Blocked  | SIMD     | Speedup |
-|-------------+----------+----------+----------+---------|
-| 256×256     | ~30ms    | ~13.4ms  | *8.9ms*  | 3.4x    |
-| 512×512     | ~300ms   | ~120ms   | *76.8ms* | 3.9x    |
-| 1024×1024   | ~2400ms  | ~800ms   | *463ms*  | 5.2x    |
+512×512 matrices, 20 iterations:
+
+| Implementation | Time    | L1 Miss Rate | Speedup |
+|----------------+---------+--------------+---------|
+| Naive          | 11.36s  | 48.5% 💥     | 1.0x    |
+| Blocked        | 3.04s   | 45.8%        | 3.7x    |
+| SIMD           | 1.49s   | 8.5%         | 7.7x    |
+| *Optimized*    | *0.65s* | *2.2%* ✅    | *17.5x* |
+| nalgebra       | 0.21s   | 2.8%         | 54x     |
+
+*Gap to production library*: Only 3x slower!
 
 * Live Benchmark: Full Scaling Analysis
 
@@ -229,34 +380,58 @@ fi
 
 * What We Learned
 
-1. *Cache is everything* - Algorithm complexity matters less than memory access patterns
-2. *Blocking is powerful* - Simple technique, massive gains (5.2x speedup)
-3. *SIMD closes the gap* - We're now only 7x slower than BLAS (was 10x)
-4. *Measure everything* - Statistical analysis reveals the truth
-5. *GPUs change the game* - Massive parallelism unlocks 100x+ speedups for large matrices
+1. *Profile first, optimize second* - FMA gave 0%, profiling found 49% overhead
+2. *Cache hierarchy is multi-level* - Blocking helps L3, column-major helps L1
+3. *Algorithmic beats instruction-level* - 2.3x from fixing structure vs 0% from FMA
+4. *Measure with hardware counters* - L1 miss rates reveal true bottlenecks
+5. *Perfect is the enemy of good* - 3x from nalgebra requires complete rewrite
 
-* The Performance Ladder
+ * The Performance Ladder
 
-- Our SIMD: 1,734 ms
-- Intel MKL BLAS: 247 ms (*Gap*: 7x)
-- GPU (projected): ~20-50 ms (*Gap*: 35-87x faster than SIMD!)
+512×512 matrices (20 iterations):
 
-* Next Steps: Performance
+- Naive: 11,360 ms
+- Blocked: 3,040 ms (3.7x faster)
+- SIMD: 1,490 ms (7.7x faster)
+- *Optimized*: *650 ms* (*17.5x faster*)
+- nalgebra: 210 ms (*Gap*: 3x)
 
-** Low-Hanging Fruit
-- FMA instructions (fused multiply-add) for better throughput
-- Memory prefetching in SIMD loops
-- Cache line alignment (64-byte boundaries)
+*Next 3x would require*: Register tiling, micro-kernels, matrix packing
 
-** Advanced Optimizations
-- Multi-level cache blocking (L1 + L2 + L3 hierarchical)
-- Thread-level parallelism (Rayon?)
-- Mixed precision (f16/f32/f64)
-- Specialized rectangular matrix kernels
+* Why Are We Still 3x Slower?
 
-** Other Improvements
-- Property-based testing (quickcheck)
-- CI/CD pipeline with performance regression testing
+nalgebra does **6.8x fewer L1 loads** (1.8B vs 265M):
+
+*Our bottlenecks*:
+1. *Buffer copying overhead* - Load matrix → buffer → dotprod (3x penalty)
+2. *Result accumulation* - result.get(i,j) every k-block (2M extra loads)
+3. *K-block redundancy* - Each element loaded 8 times (once per k-iteration)
+
+*nalgebra's advantage*:
+- Micro-kernels with register blocking
+- Keep partial sums in CPU registers (not memory)
+- Direct matrix access (no intermediate buffers)
+- Single load per matrix element
+
+*To close the gap*: Complete algorithm rewrite with register tiling
+
+* Next Steps
+
+** What Works
+- ✅ Cache blocking (3.7x improvement)
+- ✅ Column-major layout (reduces L1 misses 5x)
+- ✅ SIMD vectorization (parallelism)
+- ✅ Profiling-driven optimization (found 49% overhead)
+
+** What Doesn't
+- ❌ FMA instructions (0% improvement when algorithm bottlenecked)
+- ❌ More blocking alone (can't fix buffer copy overhead)
+
+** To Match Production Libraries
+- Register tiling (keep 4×4 sub-blocks in registers)
+- Micro-kernels (eliminate intermediate buffers)
+- Matrix packing (optimize memory layout once)
+- Multi-threading (Rayon for outer loops)
 
 * Questions?
 
