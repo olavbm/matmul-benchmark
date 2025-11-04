@@ -1,0 +1,6 @@
+    Finished `release` profile [optimized] target(s) in 5.17s
+Running simple benchmark (1 trial per matrix size)...
+./target/release/matmul --scaling 1 > scaling_data.txt
+/bin/sh: 1: ./target/release/matmul: not found
+make: *** [Makefile:106: scaling_data.txt] Error 127
+performance_distribution.png

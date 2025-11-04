@@ -15,8 +15,8 @@ cargo +nightly bench simd                        # SIMD implementations
 ## Performance Highlights
 
 **Best Results** (vs naive baseline):
-- **1024×1024**: 5.2x speedup (9s → 1.7s)
-- **512×512**: 3.9x speedup (841ms → 77ms)
+- **512×512**: 17.5x speedup through cache blocking + SIMD + buffer reuse optimization
+- **Gap to nalgebra**: 3× slower (still!)
 - **Dot product (1024 elem)**: 271ns (beats nalgebra's 288ns!)
 
 **Key Implementations**:
@@ -41,9 +41,8 @@ src/
 ├── main.rs            # CLI with --scaling and --blocked modes
 └── lib.rs             # Benchmarks (organized by category)
 
-analysis/
-├── Makefile           # make analyze, make quick, make blocked
-└── analyze_stats.py   # Statistical analysis with plots
+Makefile               # make analyze, make quick, make blocked
+analyze_stats.py       # Statistical analysis with plots
 
 visualization/         # Interactive matrix multiplication demos
 presentation.org       # Educational slideshow

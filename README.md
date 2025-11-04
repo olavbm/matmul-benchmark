@@ -12,12 +12,13 @@ cargo +nightly bench                   # Full benchmark suite
 
 ## Performance Highlights
 
-**5.2x speedup** (1024×1024 matrices) through:
+**17.5x speedup** (512×512 matrices, vs naive baseline) through:
 - Cache blocking (64×64 blocks for L1d cache)
 - SIMD vectorization (AVX2 - 4×f64 parallel)
 - Memory layout optimization (column-major conversion)
+- Profiling-driven bug fixes (eliminated 49% overhead)
 
-**Dot product**: 271ns vs nalgebra's 288ns ⚡
+**Still 3× slower than nalgebra** - but our dot product beats theirs: 271ns vs 288ns ⚡
 
 ## What's Inside
 
@@ -40,10 +41,15 @@ cargo +nightly bench simd              # SIMD variants
 
 ## Performance Results
 
-| Matrix Size | Naive    | SIMD     | Speedup |
-|-------------|----------|----------|---------|
-| 512×512     | 841ms    | 77ms     | 3.9×    |
-| 1024×1024   | 9,039ms  | 1,632ms  | 5.2×    |
+**512×512 matrices** (criterion benchmarks):
+
+| Implementation | Time/Iteration | L1 Miss Rate | Speedup |
+|----------------|----------------|--------------|---------|
+| Naive          | ~570ms         | 48.5%        | 1.0×    |
+| Blocked        | ~150ms         | 45.8%        | 3.7×    |
+| SIMD           | ~75ms          | 8.5%         | 7.7×    |
+| **Optimized**  | **~32ms**      | **2.2%**     | **17.5×** |
+| nalgebra       | ~10ms          | 2.8%         | 54×     |
 
 **GPU exploration** (arrayfire_demo/): 157 GFLOPS on Intel iGPU (2.63× vs CPU)
 

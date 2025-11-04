@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Matrix B Memory Access Patterns</title>
+    <style>
+        body {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: monospace;
+            padding: 20px;
+        }
+        h1 { color: #4ec9b0; }
+        h2 { color: #569cd6; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #333;
+            color: #d4d4d4;
+            border: 1px solid #555;
+        }
+        button:hover {
+            background: #444;
+        }
+        canvas {
+            border: 1px solid #444;
+            display: block;
+            margin: 20px 0;
+        }
+        .stats {
+            font-size: 18px;
+            margin: 10px 0;
+        }
+        .good { color: #4ec9b0; }
+        .bad { color: #f48771; }
+        .description {
+            max-width: 1200px;
+            line-height: 1.6;
+            margin: 20px 0;
+            padding: 15px;
+            background: #252526;
+            border-left: 3px solid #4ec9b0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Matrix B Memory Access Patterns</h1>
+
+    <div class="description">
+        <strong>Key Insight:</strong> Matrices are stored in memory as continuous rows (row-major order).
+        Accessing elements row-wise (→) uses cache efficiently. Accessing column-wise (↓) causes cache misses!
+    </div>
+
+    <button onclick="showViz('row-major')">✓ Row-Major Access (Fast)</button>
+    <button onclick="showViz('column-major')">✗ Column-Major Access (Slow)</button>
+    <button onclick="showViz('comparison')">Side-by-Side Comparison</button>
+
+    <div id="viz-container"></div>
+
+    <script>
+        const MATRIX_SIZE = 8;
+        const CELL_SIZE = 50;
+        const PADDING = 50;
+        const CACHE_LINE_SIZE = 4; // Simulate 4 elements per cache line
+
+        let currentAnimation = null;
+
+        function showViz(type) {
+            if (currentAnimation) currentAnimation.stop();
+
+            const container = document.getElementById('viz-container');
+
+            if (type === 'comparison') {
+                container.innerHTML = `
+                    <h2>Side-by-Side Comparison</h2>
+                    <canvas id="canvas" width="1400" height="600"></canvas>
+                    <div class="stats">
+                        <div><span class="good">Row-Major Cache Hits: <span id="row-hits">0</span></span> | <span class="bad">Misses: <span id="row-misses">0</span></span></div>
+                        <div><span class="good">Column-Major Cache Hits: <span id="col-hits">0</span></span> | <span class="bad">Misses: <span id="col-misses">0</span></span></div>
+                    </div>
+                    <button onclick="currentAnimation.start()">Start</button>
+                    <button onclick="currentAnimation.reset()">Reset</button>
+                `;
+                currentAnimation = new ComparisonAnimation(document.getElementById('canvas').getContext('2d'));
+            } else {
+                const isRowMajor = type === 'row-major';
+                container.innerHTML = `
+                    <h2>${isRowMajor ? '✓ Row-Major' : '✗ Column-Major'} Access Pattern</h2>
+                    <canvas id="canvas" width="1200" height="600"></canvas>
+                    <div class="stats">
+                        <div>Memory Accesses: <span id="accesses">0</span></div>
+                        <div class="good">Cache Hits: <span id="hits">0</span></div>
+                        <div class="bad">Cache Misses: <span id="misses">0</span></div>
+                        <div>Hit Rate: <span id="hit-rate">0%</span></div>
+                    </div>
+                    <button onclick="currentAnimation.start()">Start</button>
+                    <button onclick="currentAnimation.reset()">Reset</button>
+                `;
+                const canvas = document.getElementById('canvas');
+                currentAnimation = new MemoryAccessAnimation(canvas.getContext('2d'), isRowMajor);
+            }
+        }
+
+        class MemoryAccessAnimation {
+            constructor(ctx, isRowMajor) {
+                this.ctx = ctx;
+                this.isRowMajor = isRowMajor;
+                this.idx = 0;
+                this.accesses = 0;
+                this.hits = 0;
+                this.misses = 0;
+                this.cache = new Set();
+                this.running = false;
+                this.history = [];
+                this.draw();
+            }
+
+            start() {
+                this.running = true;
+                this.step();
+            }
+
+            stop() {
+                this.running = false;
+            }
+
+            reset() {
+                this.stop();
+                this.idx = 0;
+                this.accesses = 0;
+                this.hits = 0;
+                this.misses = 0;
+                this.cache.clear();
+                this.history = [];
+                this.draw();
+            }
+
+            getCoords(idx) {
+                if (this.isRowMajor) {
+                    // Access row by row: (0,0), (0,1), (0,2)...
+                    return [Math.floor(idx / MATRIX_SIZE), idx % MATRIX_SIZE];
+                } else {
+                    // Access column by column: (0,0), (1,0), (2,0)...
+                    return [idx % MATRIX_SIZE, Math.floor(idx / MATRIX_SIZE)];
+                }
+            }
+
+            step() {
+                if (!this.running || this.idx >= MATRIX_SIZE * MATRIX_SIZE) {
+                    this.running = false;
+                    return;
+                }
+
+                const [row, col] = this.getCoords(this.idx);
+                const memIdx = row * MATRIX_SIZE + col; // Actual memory location
+                const cacheLine = Math.floor(memIdx / CACHE_LINE_SIZE);
+
+                this.accesses++;
+
+                // Check if this cache line is already loaded
+                if (this.cache.has(cacheLine)) {
+                    this.hits++;
+                    this.history.push({ row, col, hit: true });
+                } else {
+                    this.misses++;
+                    this.cache.add(cacheLine);
+                    this.history.push({ row, col, hit: false });
+
+                    // Simple cache eviction - keep last 8 cache lines
+                    if (this.cache.size > 8) {
+                        const oldestLine = Math.floor((memIdx - 8 * CACHE_LINE_SIZE) / CACHE_LINE_SIZE);
+                        this.cache.delete(oldestLine);
+                    }
+                }
+
+                this.idx++;
+                this.draw();
+
+                if (this.running) {
+                    setTimeout(() => this.step(), 200);
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#1e1e1e';
+                ctx.fillRect(0, 0, 1200, 600);
+
+                // Draw matrix
+                const matrixX = PADDING;
+                const matrixY = PADDING + 50;
+
+                ctx.font = '18px monospace';
+                ctx.fillStyle = '#4ec9b0';
+                ctx.fillText('Matrix B in Memory', matrixX, matrixY - 30);
+                ctx.fillStyle = '#858585';
+                ctx.font = '14px monospace';
+                ctx.fillText(this.isRowMajor ? '(accessing rows sequentially ➜)' : '(accessing columns sequentially ↓)', matrixX, matrixY - 10);
+
+                // Draw matrix cells
+                for (let i = 0; i < MATRIX_SIZE; i++) {
+                    for (let j = 0; j < MATRIX_SIZE; j++) {
+                        const x = matrixX + j * CELL_SIZE;
+                        const y = matrixY + i * CELL_SIZE;
+
+                        // Find if this cell was accessed and when
+                        const accessIdx = this.history.findIndex(h => h.row === i && h.col === j);
+
+                        if (accessIdx !== -1) {
+                            const access = this.history[accessIdx];
+                            ctx.fillStyle = access.hit ? 'rgba(78, 201, 176, 0.5)' : 'rgba(244, 135, 113, 0.5)';
+                            ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+                        }
+
+                        ctx.strokeStyle = '#444';
+                        ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+
+                        // Draw cell label
+                        ctx.fillStyle = '#d4d4d4';
+                        ctx.font = '12px monospace';
+                        ctx.fillText(`${i},${j}`, x + 5, y + 20);
+                        ctx.fillText(`[${i * MATRIX_SIZE + j}]`, x + 5, y + 35);
+                    }
+                }
+
+                // Draw current position
+                if (this.idx < MATRIX_SIZE * MATRIX_SIZE) {
+                    const [row, col] = this.getCoords(this.idx);
+                    ctx.strokeStyle = '#dcdcaa';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(matrixX + col * CELL_SIZE, matrixY + row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                }
+
+                // Draw memory layout visualization
+                const memY = matrixY + MATRIX_SIZE * CELL_SIZE + 50;
+                ctx.fillStyle = '#569cd6';
+                ctx.font = '18px monospace';
+                ctx.fillText('Physical Memory Layout (row-major):', PADDING, memY);
+
+                const memCellWidth = 30;
+                const memCellHeight = 30;
+                for (let i = 0; i < MATRIX_SIZE * MATRIX_SIZE; i++) {
+                    const x = PADDING + (i % 16) * memCellWidth;
+                    const y = memY + 20 + Math.floor(i / 16) * memCellHeight;
+
+                    const cacheLine = Math.floor(i / CACHE_LINE_SIZE);
+                    const inCache = this.cache.has(cacheLine);
+
+                    // Color based on cache line
+                    const hue = (cacheLine * 50) % 360;
+                    ctx.fillStyle = inCache ? `hsla(${hue}, 60%, 50%, 0.6)` : '#252526';
+                    ctx.fillRect(x, y, memCellWidth, memCellHeight);
+
+                    ctx.strokeStyle = '#444';
+                    ctx.strokeRect(x, y, memCellWidth, memCellHeight);
+
+                    // Mark if accessed
+                    const row = Math.floor(i / MATRIX_SIZE);
+                    const col = i % MATRIX_SIZE;
+                    const accessIdx = this.history.findIndex(h => h.row === row && h.col === col);
+                    if (accessIdx !== -1) {
+                        ctx.fillStyle = this.history[accessIdx].hit ? '#4ec9b0' : '#f48771';
+                        ctx.fillRect(x + 2, y + 2, memCellWidth - 4, memCellHeight - 4);
+                    }
+                }
+
+                // Draw cache line boundaries
+                ctx.strokeStyle = '#dcdcaa';
+                ctx.lineWidth = 2;
+                for (let i = 0; i <= MATRIX_SIZE * MATRIX_SIZE / CACHE_LINE_SIZE; i++) {
+                    const cellIdx = i * CACHE_LINE_SIZE;
+                    const x = PADDING + (cellIdx % 16) * memCellWidth;
+                    if (cellIdx % 16 === 0) {
+                        const y = memY + 20 + Math.floor(cellIdx / 16) * memCellHeight;
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(x, y + memCellHeight);
+                        ctx.stroke();
+                    }
+                }
+
+                // Update stats
+                document.getElementById('accesses').textContent = this.accesses;
+                document.getElementById('hits').textContent = this.hits;
+                document.getElementById('misses').textContent = this.misses;
+                const hitRate = this.accesses > 0 ? ((this.hits / this.accesses) * 100).toFixed(1) : 0;
+                document.getElementById('hit-rate').textContent = hitRate + '%';
+            }
+        }
+
+        class ComparisonAnimation {
+            constructor(ctx) {
+                this.ctx = ctx;
+                this.idx = 0;
+                this.rowHits = 0;
+                this.rowMisses = 0;
+                this.colHits = 0;
+                this.colMisses = 0;
+                this.rowCache = new Set();
+                this.colCache = new Set();
+                this.running = false;
+                this.draw();
+            }
+
+            start() {
+                this.running = true;
+                this.step();
+            }
+
+            stop() {
+                this.running = false;
+            }
+
+            reset() {
+                this.stop();
+                this.idx = 0;
+                this.rowHits = 0;
+                this.rowMisses = 0;
+                this.colHits = 0;
+                this.colMisses = 0;
+                this.rowCache.clear();
+                this.colCache.clear();
+                this.draw();
+            }
+
+            step() {
+                if (!this.running || this.idx >= MATRIX_SIZE * MATRIX_SIZE) {
+                    this.running = false;
+                    return;
+                }
+
+                // Row-major access
+                const rowCoords = [Math.floor(this.idx / MATRIX_SIZE), this.idx % MATRIX_SIZE];
+                const rowMemIdx = rowCoords[0] * MATRIX_SIZE + rowCoords[1];
+                const rowCacheLine = Math.floor(rowMemIdx / CACHE_LINE_SIZE);
+
+                if (this.rowCache.has(rowCacheLine)) {
+                    this.rowHits++;
+                } else {
+                    this.rowMisses++;
+                    this.rowCache.add(rowCacheLine);
+                    if (this.rowCache.size > 8) {
+                        const oldestLine = Math.floor((rowMemIdx - 8 * CACHE_LINE_SIZE) / CACHE_LINE_SIZE);
+                        this.rowCache.delete(oldestLine);
+                    }
+                }
+
+                // Column-major access
+                const colCoords = [this.idx % MATRIX_SIZE, Math.floor(this.idx / MATRIX_SIZE)];
+                const colMemIdx = colCoords[0] * MATRIX_SIZE + colCoords[1];
+                const colCacheLine = Math.floor(colMemIdx / CACHE_LINE_SIZE);
+
+                if (this.colCache.has(colCacheLine)) {
+                    this.colHits++;
+                } else {
+                    this.colMisses++;
+                    this.colCache.add(colCacheLine);
+                    if (this.colCache.size > 8) {
+                        const oldestLine = Math.floor((colMemIdx - 8 * CACHE_LINE_SIZE) / CACHE_LINE_SIZE);
+                        this.colCache.delete(oldestLine);
+                    }
+                }
+
+                this.idx++;
+                this.draw();
+
+                if (this.running) {
+                    setTimeout(() => this.step(), 100);
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.fillStyle = '#1e1e1e';
+                ctx.fillRect(0, 0, 1400, 600);
+
+                // Draw row-major on left
+                this.drawMatrix(PADDING, PADDING, 'Row-Major Access ✓', true);
+
+                // Draw column-major on right
+                this.drawMatrix(PADDING + 600, PADDING, 'Column-Major Access ✗', false);
+
+                // Update stats
+                document.getElementById('row-hits').textContent = this.rowHits;
+                document.getElementById('row-misses').textContent = this.rowMisses;
+                document.getElementById('col-hits').textContent = this.colHits;
+                document.getElementById('col-misses').textContent = this.colMisses;
+            }
+
+            drawMatrix(x, y, title, isRowMajor) {
+                const ctx = this.ctx;
+
+                ctx.fillStyle = isRowMajor ? '#4ec9b0' : '#f48771';
+                ctx.font = '18px monospace';
+                ctx.fillText(title, x, y);
+
+                const matrixY = y + 30;
+
+                // Draw matrix cells
+                for (let i = 0; i < MATRIX_SIZE; i++) {
+                    for (let j = 0; j < MATRIX_SIZE; j++) {
+                        const cellX = x + j * CELL_SIZE;
+                        const cellY = matrixY + i * CELL_SIZE;
+
+                        // Calculate if this cell has been accessed
+                        const accessOrder = isRowMajor ?
+                            i * MATRIX_SIZE + j :
+                            j * MATRIX_SIZE + i;
+
+                        if (accessOrder < this.idx) {
+                            ctx.fillStyle = isRowMajor ? 'rgba(78, 201, 176, 0.3)' : 'rgba(244, 135, 113, 0.3)';
+                            ctx.fillRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
+                        }
+
+                        ctx.strokeStyle = '#444';
+                        ctx.strokeRect(cellX, cellY, CELL_SIZE, CELL_SIZE);
+
+                        // Draw access order number
+                        if (accessOrder < this.idx) {
+                            ctx.fillStyle = '#d4d4d4';
+                            ctx.font = '14px monospace';
+                            ctx.fillText(accessOrder.toString(), cellX + CELL_SIZE/2 - 10, cellY + CELL_SIZE/2 + 5);
+                        }
+                    }
+                }
+
+                // Draw current position
+                if (this.idx < MATRIX_SIZE * MATRIX_SIZE) {
+                    const coords = isRowMajor ?
+                        [Math.floor(this.idx / MATRIX_SIZE), this.idx % MATRIX_SIZE] :
+                        [this.idx % MATRIX_SIZE, Math.floor(this.idx / MATRIX_SIZE)];
+
+                    ctx.strokeStyle = '#dcdcaa';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(x + coords[1] * CELL_SIZE, matrixY + coords[0] * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                }
+
+                // Draw hit rate bar
+                const total = isRowMajor ? (this.rowHits + this.rowMisses) : (this.colHits + this.colMisses);
+                if (total > 0) {
+                    const hits = isRowMajor ? this.rowHits : this.colHits;
+                    const hitRate = (hits / total) * 100;
+
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(x, matrixY + MATRIX_SIZE * CELL_SIZE + 20, 300, 30);
+
+                    ctx.fillStyle = isRowMajor ? '#4ec9b0' : '#f48771';
+                    ctx.fillRect(x, matrixY + MATRIX_SIZE * CELL_SIZE + 20, (hitRate / 100) * 300, 30);
+
+                    ctx.strokeStyle = '#555';
+                    ctx.strokeRect(x, matrixY + MATRIX_SIZE * CELL_SIZE + 20, 300, 30);
+
+                    ctx.fillStyle = '#d4d4d4';
+                    ctx.font = '16px monospace';
+                    ctx.fillText(`Hit Rate: ${hitRate.toFixed(1)}%`, x + 10, matrixY + MATRIX_SIZE * CELL_SIZE + 42);
+                }
+            }
+        }
+
+        // Show comparison by default
+        showViz('comparison');
+    </script>
+</body>
+</html>
