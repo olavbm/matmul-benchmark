@@ -258,12 +258,11 @@ size,algorithm,block_size,time_ns,gflops
 1024,blocked_ultimate,64,614751652,3.493254
 #+end_example
 
-    Size    | Naive  | Optimized | Best Blocked | blocked_ultimate
-  --------|--------|-----------|--------------|------------------
-  256×256 | 1.27   | 2.49      | 1.83 (b=32)  | 3.46
-  512×512 | 0.49   | 2.50      | 1.86 (b=32)  | 3.66
-  768×768 | 0.60   | 2.56      | 1.92 (b=32)  | 3.60
-  1024²   | 0.47   | 2.56      | 1.83 (b=32)  | 3.69
+*Key findings*:
+- Block size 32-64 typically optimal for this hardware (L1d = 37KB)
+- Speedup increases with matrix size
+- Combined optimizations (blocked + SIMD + column-major) provide best results
+- Performance varies significantly with hardware specs
 
 * Strategy 3: SIMD Vectorization
 
@@ -302,26 +301,23 @@ Key metrics:
 
 - perf [--version] [--help] [OPTIONS] COMMAND [ARGS]
 
-* Hardware Performance Counters: The Smoking Gun (512×512, 20 iterations)
+* Hardware Performance Counters: The Insights (512×512)
 
-| Metric                | Naive      | Blocked    | SIMD       | nalgebra   |
+| Metric                | Naive      | Blocked    | Optimized  | nalgebra   |
 |-----------------------+------------+------------+------------+------------|
-| *Time*                | 11.56s     | 3.26s      | 0.66s      | 0.22s      |
-| *Instructions*        | 32.3B      | 30.4B      | 4.7B       | 1.5B       |
-| *L1 cache misses*     | 2.54B      | 2.54B      | 38.5M      | 7.5M       |
-| *L1 miss rate*        | 48%        | 46%        | 2.0%       | 2.8%       |
-| *LLC loads*           | 2.26B      | 1.4M       | 2.2M       | 0.77M      |
-|-----------------------+------------+------------+------------+------------|
-| *Backend Bound*       | 76.8%      | 12.9%      | 21.6%      | 40.6%      |
-| *Memory Bound*        | 41.7%      | 1.6%       | 7.8%       | 4.3%       |
-| *Retiring (useful)*   | 20.5%      | 65.1%      | 62.7%      | 57.0%      |
+| *L1 miss rate*        | ~48%       | ~46%       | ~2-8%      | ~3%        |
+| *Backend Bound*       | ~77%       | ~13%       | ~22%       | ~41%       |
+| *Memory Bound*        | ~42%       | ~2%        | ~8%        | ~4%        |
+| *Retiring (useful)*   | ~21%       | ~65%       | ~63%       | ~57%       |
 
 *Key insights*:
-- Naive spends 41.7% of time waiting on memory - *cache catastrophe*!
-- Blocked fixes LLC (L3) but not L1 - still 46% L1 miss rate
-- SIMD + column-major: *66× fewer L1 misses* (2.5B → 38M)
+- Naive spends ~42% of time waiting on memory - *cache catastrophe*!
+- Blocked fixes L3 but not L1 - still ~46% L1 miss rate
+- Optimized + SIMD: *Dramatically fewer L1 misses* (~50× better)
 - Blocked does *3× more useful work* (65% retiring vs 20%)
-- nalgebra executes *7× fewer instructions* than SIMD - algorithmic superiority
+- nalgebra executes *far fewer instructions* - algorithmic superiority
+
+*Note*: Relative improvements are consistent; absolute values vary by hardware.
 
 * Live Demo: Profiling Comparison
 
@@ -334,8 +330,8 @@ cd /home/olav/dev/rust/matmul
 Watch how L1 miss rate drops:
 - Naive: ~48% (cache catastrophe)
 - Blocked: ~46% (helps L3, not L1)
-- SIMD: ~8% (column-major fixes it)
-- Optimized: ~2% (near perfect!)
+- SIMD: ~8% (column-major helps significantly)
+- Optimized: ~2-5% (much better!)
   
 * The Smoking Gun: 49% Overhead
 
@@ -370,9 +366,9 @@ for i in ii..i_end {
 #+END_SRC
 
 *Impact*:
-- Time: 1.49s → 0.65s (*2.3x speedup*)
-- Instructions: 13.6B → 4.8B (*2.8x fewer*)
-- L1 miss rate: 10.1% → 2.2% (*4.6x better*)
+- Performance: *~2× additional speedup*
+- Instructions: *~2.8× fewer*
+- L1 miss rate: *~4-5× better*
 
 * What Didn't Work: FMA Instructions
 
@@ -387,7 +383,7 @@ sum_vec = _mm256_add_pd(sum_vec, prod);
 sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
 #+END_SRC
 
-*Result*: 1.49s → 1.49s (*0% improvement!*)
+*Result*: *0% improvement!*
 
 *Why?* We weren't bottlenecked by multiply-add operations. The real problem was algorithmic (redundant buffer fills).
 
@@ -395,17 +391,19 @@ sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
 
 * Performance Comparison: The Numbers
 
-512×512 matrices, 20 iterations:
+512×512 matrices:
 
-| Implementation | Time    | L1 Miss Rate | Speedup |
-|----------------+---------+--------------+---------|
-| Naive          | 11.36s  | 48.5% 💥     | 1.0x    |
-| Blocked        | 3.04s   | 45.8%        | 3.7x    |
-| SIMD           | 1.49s   | 8.5%         | 7.7x    |
-| *Optimized*    | *0.65s* | *2.2%* ✅    | *17.5x* |
-| nalgebra       | 0.21s   | 2.8%         | 54x     |
+| Implementation | L1 Miss Rate | Speedup vs Naive |
+|----------------|--------------|------------------|
+| Naive          | ~48% 💥      | 1.0×             |
+| Blocked        | ~46%         | ~3-4×            |
+| SIMD           | ~8%          | ~7-8×            |
+| *Optimized*    | *~2-5%* ✅   | *~10-15×*        |
+| nalgebra       | ~3%          | ~50×+            |
 
-*Gap to production library*: Only 3x slower!
+*Gap to production library*: Still several times slower, but much better!
+
+*Note*: Exact speedups vary by hardware; relative improvements are consistent.
 
 * Live Benchmark: Full Scaling Analysis
 
@@ -458,8 +456,10 @@ Theoretical speedup for 1024×1024:
 * What We Learned
 
 1. *Profile first, optimize second* - FMA gave 0%, profiling found 49% overhead
-2. *Cache hierarchy is multi-level* - Column-major helps L1
-3. *Measure with hardware counters* - L1 miss rates reveal true bottlenecks
+2. *Cache hierarchy is multi-level* - Different optimizations target L1 vs L3
+3. *Algorithmic > Instruction-level* - Buffer reuse (~2× gain) beat FMA (0% gain)
+4. *Measure with hardware counters* - L1 miss rates reveal true bottlenecks
+5. *Performance is relative* - Hardware differences matter; focus on relative gains
 
 * Next Steps
 ** What Works

@@ -36,9 +36,9 @@ For 512×512 matrices: *268 million operations*
 
 * The Naive Baseline
 
-512×512 matrices (20 iterations):
-- Time: 11.36 seconds
-- L1 cache miss rate: *48.5%* 💥
+512×512 matrices:
+- L1 cache miss rate: *~48%* 💥
+- Performance: Very slow (baseline)
 
 Nearly half of all memory accesses miss L1 cache!
 
@@ -64,9 +64,9 @@ for ii in (0..n).step_by(64) {
 }
 #+END_SRC
 
-*Result*: 11.36s → 3.04s (*3.7× speedup*)
+*Result*: *~3-4× speedup*
 
-But L1 miss rate still 45.8%... 🤔
+But L1 miss rate still ~46%... 🤔
 
 * Optimization #2: SIMD Vectorization
 
@@ -84,16 +84,16 @@ unsafe fn simd_dotprod_avx2(a: &[f64], b: &[f64]) -> f64 {
 }
 #+END_SRC
 
-*Result*: 3.04s → 1.49s (*7.7× total speedup*)
+*Result*: *~7-8× total speedup*
 
-L1 miss rate: 8.5% (much better!)
+L1 miss rate: ~8% (much better!)
 
 * The Nagging Feeling
 
-7.7× speedup sounds great... but:
-- nalgebra (production library): 0.21s
-- Our SIMD code: 1.49s
-- Gap: *7× slower*
+7-8× speedup sounds great... but:
+- nalgebra (production library): Very fast
+- Our SIMD code: Still felt slow
+- Gap: *Several times slower*
 
 And I couldn't shake the feeling something was wasteful.
 
@@ -105,15 +105,10 @@ And I couldn't shake the feeling something was wasteful.
 perf stat -d ./matmul_simd
 #+END_SRC
 
-Key metrics:
-| Metric | Value |
-|--------|-------|
-| Time | 1.49s |
-| Instructions | 13.6 billion |
-| Cycles | 8.2 billion |
-| *Backend Bound* | *49.3%* |
+Key metric revealed:
+- *Backend Bound: ~49%*
 
-*49% of execution time doing... what exactly?*
+*Nearly half of execution time stalled... why?*
 
 * Deep Dive: perf record
 
@@ -166,21 +161,22 @@ Simple change: hoist column buffer prep outside inner loop.
 
 * The Results
 
-512×512 matrices (20 iterations):
+512×512 matrices:
 
-| Implementation | Time | L1 Miss Rate | Speedup |
-|----------------|------|--------------|---------|
-| Naive | 11.36s | 48.5% 💥 | 1.0× |
-| Blocked | 3.04s | 45.8% | 3.7× |
-| SIMD | 1.49s | 8.5% | 7.7× |
-| *Fixed* | *0.65s* | *2.2%* ✅ | *17.5×* |
-| nalgebra | 0.21s | 2.8% | 54× |
+| Implementation | L1 Miss Rate | Speedup vs Naive |
+|----------------|--------------|------------------|
+| Naive | ~48% 💥 | 1.0× |
+| Blocked | ~46% | ~3-4× |
+| SIMD | ~8% | ~7-8× |
+| *Fixed* | *~2%* ✅ | *~10-15×* |
+| nalgebra | ~3% | ~50×+ |
 
-*2.3× speedup from one algorithmic fix!*
+*~2× additional speedup from one algorithmic fix!*
 
-- Instructions: 13.6B → 4.8B (2.8× fewer)
-- L1 misses: 10.1% → 2.2% (4.6× better)
-- Backend bound: 49% → 21%
+After fixing buffer reuse:
+- Instructions: ~2.8× fewer
+- L1 misses: ~4-5× better
+- Backend bound: 49% → ~21%
 
 * What Didn't Work
 
@@ -194,7 +190,7 @@ sum_vec = _mm256_add_pd(sum_vec, _mm256_mul_pd(a_vec, b_vec));
 sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
 #+END_SRC
 
-*Result*: 1.49s → 1.49s (*0% improvement!*)
+*Result*: *0% improvement!*
 
 *Why?* Not bottlenecked by arithmetic. Real problem was algorithmic.
 
@@ -218,10 +214,10 @@ sum_vec = _mm256_fmadd_pd(a_vec, b_vec, sum_vec);
 
 * The Gap Remains
 
-We're still 3× slower than nalgebra (0.65s vs 0.21s).
+We're still *several times slower* than nalgebra.
 
 *Why?*
-- They do *6.8× fewer L1 loads* (265M vs 1.8B)
+- They do *far fewer L1 loads* (better algorithms)
 - Register tiling (keep 4×4 blocks in CPU registers)
 - Micro-kernels (no intermediate buffers)
 - Matrix packing (optimize layout once)
@@ -229,6 +225,8 @@ We're still 3× slower than nalgebra (0.65s vs 0.21s).
 *But*: Our dot product *beats* nalgebra: 271ns vs 288ns!
 
 Sometimes you win the battle but not the war.
+
+*Note*: Exact performance varies by hardware/compiler.
 
 * Key Takeaway
 
