@@ -240,6 +240,133 @@ class BlockedMatMul(Scene):
         return block
 
 
+class DotProductMatMul(Scene):
+    """Shows how each row of A dots with each column of B to produce C[i,j]"""
+    def construct(self):
+        # Title
+        title = Text("Matrix Multiplication: Row × Column", font_size=36)
+        title.to_edge(UP)
+        self.play(Write(title))
+        self.wait(0.5)
+
+        # Example 2x2 matrices with actual numbers
+        a_vals = [[1, 2], [3, 4]]
+        b_vals = [[5, 6], [7, 8]]
+
+        # Create matrix B (top)
+        b_matrix = Matrix(b_vals, h_buff=1.2)
+        b_label = MathTex("B", "=").next_to(b_matrix, LEFT)
+        b_group = VGroup(b_label, b_matrix)
+        b_group.shift(RIGHT * 1 + UP * 2)
+
+        # Create matrix A (left)
+        a_matrix = Matrix(a_vals, h_buff=1.2)
+        a_label = MathTex("A", "=").next_to(a_matrix, LEFT)
+        a_group = VGroup(a_label, a_matrix)
+        a_group.shift(LEFT * 2.5 + DOWN * 0.5)
+
+        # Show A and B
+        self.play(Write(b_group), Write(a_group))
+        self.wait(1)
+
+        # Create matrix C (initially empty with placeholders)
+        # Position C to align with A vertically and B horizontally
+        c_matrix = Matrix([["?", "?"], ["?", "?"]], h_buff=1.2)
+        # Align C's center with A's horizontal center and B's vertical center
+        c_matrix.move_to([b_matrix.get_center()[0], a_matrix.get_center()[1], 0])
+        c_label = MathTex("= C").next_to(c_matrix, RIGHT)
+
+        # Fade in C
+        self.play(FadeIn(c_matrix), FadeIn(c_label))
+        self.wait(0.5)
+
+        # Store computed values
+        c_vals = [["?", "?"], ["?", "?"]]
+
+        # Compute each element of C
+        for i in range(2):
+            for j in range(2):
+                # Highlight row i of A and column j of B
+                row_rect = self.create_row_highlight_for_matrix(a_matrix, i, BLUE)
+                col_rect = self.create_col_highlight_for_matrix(b_matrix, j, GREEN)
+
+                self.play(Create(row_rect), Create(col_rect), run_time=0.4)
+                self.wait(0.3)
+
+                # Show the computation formula with actual numbers
+                result = 0
+                for k in range(2):
+                    result += a_vals[i][k] * b_vals[k][j]
+
+                # Build the expression: C[i,j] = 1·5 + 2·7 = 19
+                expr_parts = [f"C[{i},{j}]", "="]
+                for k in range(2):
+                    if k > 0:
+                        expr_parts.append("+")
+                    expr_parts.append(f"{a_vals[i][k]}")
+                    expr_parts.append("\\cdot")
+                    expr_parts.append(f"{b_vals[k][j]}")
+                expr_parts.extend(["=", f"{result}"])
+
+                formula = MathTex(*expr_parts, font_size=36)
+                formula.next_to(c_matrix, DOWN, buff=0.8)
+
+                self.play(Write(formula), run_time=0.8)
+                self.wait(0.5)
+
+                # Update C matrix with the result
+                c_vals[i][j] = str(result)
+                new_c_matrix = Matrix(c_vals, h_buff=1.2)
+                new_c_matrix.move_to(c_matrix.get_center())
+
+                self.play(Transform(c_matrix, new_c_matrix), run_time=0.4)
+                self.wait(0.3)
+
+                # Remove highlights and formula
+                self.play(
+                    FadeOut(row_rect),
+                    FadeOut(col_rect),
+                    FadeOut(formula),
+                    run_time=0.3
+                )
+                self.wait(0.2)
+
+        # Add the relationship "= A × B" after the existing label
+        relationship = MathTex("= A \\times B").next_to(c_label, RIGHT, buff=0.2)
+        self.play(FadeIn(relationship), run_time=0.5)
+
+        self.wait(2)
+
+    def create_row_highlight_for_matrix(self, matrix, row, color):
+        """Create a rectangle highlighting a row in a Manim Matrix"""
+        # Get the matrix entries
+        entries = matrix.get_entries()
+        n_cols = 2
+
+        # Get positions of row elements
+        row_entries = [entries[row * n_cols + col] for col in range(n_cols)]
+
+        # Create surrounding rectangle
+        rect = SurroundingRectangle(VGroup(*row_entries), color=color, buff=0.15)
+        rect.set_stroke(width=3)
+        return rect
+
+    def create_col_highlight_for_matrix(self, matrix, col, color):
+        """Create a rectangle highlighting a column in a Manim Matrix"""
+        # Get the matrix entries
+        entries = matrix.get_entries()
+        n_rows = 2
+        n_cols = 2
+
+        # Get positions of column elements
+        col_entries = [entries[row * n_cols + col] for row in range(n_rows)]
+
+        # Create surrounding rectangle
+        rect = SurroundingRectangle(VGroup(*col_entries), color=color, buff=0.15)
+        rect.set_stroke(width=3)
+        return rect
+
+
 class SimdMatMul(Scene):
     def construct(self):
         # Title
