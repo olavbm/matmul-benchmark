@@ -8,7 +8,7 @@ fn main() {
 
     // Use OpenCL backend (GPU)
     set_backend(Backend::OPENCL);
-    println!("\n✓ Using GPU: {}\n", device_info());
+    println!("\n✓ Using GPU: {:?}\n", device_info());
 
     // Create 1024x1024 matrices
     let n = 1024;
@@ -25,6 +25,5 @@ fn main() {
 
     println!("✓ Done!");
     println!("\nResult dimensions: {:?}", c.dims());
-    println!("First element: {:.6}", c.index(&[Seq::default(), Seq::new(0.0, 0.0, 1.0),
-                                                  Seq::default(), Seq::default()]).get(0));
+    println!("✓ GPU matrix multiplication completed successfully!");
 }

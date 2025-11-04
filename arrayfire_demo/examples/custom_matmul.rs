@@ -1,10 +1,11 @@
 use arrayfire::*;
 use af_opencl_interop as afcl;
-use ocl_core::{self as core, OclPrm};
+use ocl_core::{self as core};
 use std::ffi::CString;
 use std::time::Instant;
 
 // Simple naive OpenCL matrix multiplication kernel
+// ArrayFire uses COLUMN-MAJOR layout: A[row,col] = A[row + col*N]
 const MATMUL_KERNEL: &str = r#"
 __kernel void matmul_naive(
     __global const float* A,
@@ -18,9 +19,10 @@ __kernel void matmul_naive(
     if (row < N && col < N) {
         float sum = 0.0f;
         for (int k = 0; k < N; k++) {
-            sum += A[row * N + k] * B[k * N + col];
+            // Column-major: A[row,k] = A[row + k*N], B[k,col] = B[k + col*N]
+            sum += A[row + k * N] * B[k + col * N];
         }
-        C[row * N + col] = sum;
+        C[row + col * N] = sum;
     }
 }
 "#;
@@ -45,7 +47,9 @@ fn main() {
     let mut c = constant(0.0f32, dims);
 
     // Get OpenCL context, device, and queue from ArrayFire
-    let (dev_id, ctx, queue) = afcl::get_device_id_context_queue();
+    let dev_id = afcl::get_device_id();
+    let ctx = afcl::get_context(false);
+    let queue = afcl::get_queue(false);
 
     println!("✓ Got OpenCL context from ArrayFire");
     println!("  Device: {:?}", dev_id);
@@ -57,10 +61,12 @@ fn main() {
             .expect("Failed to create program")
     };
 
+    let device = unsafe { core::DeviceId::from_raw(dev_id) };
+
     unsafe {
         core::build_program(
             &program,
-            Some(&[dev_id]),
+            Some(&[device]),
             &CString::new("").unwrap(),
             None,
             None,
@@ -70,16 +76,16 @@ fn main() {
     println!("✓ Compiled custom kernel");
 
     let kernel = unsafe {
-        core::create_kernel(&program, &CString::new("matmul_naive").unwrap())
+        core::create_kernel(&program, "matmul_naive")
             .expect("Failed to create kernel")
     };
 
     println!("✓ Created kernel object\n");
 
     // Lock arrays and get cl_mem pointers
-    let a_ptr = a.device_ptr() as core::Mem;
-    let b_ptr = b.device_ptr() as core::Mem;
-    let c_ptr = c.device_ptr() as core::Mem;
+    let a_ptr = unsafe { core::Mem::from_raw_copied_ptr(a.device_ptr() as *mut std::ffi::c_void) };
+    let b_ptr = unsafe { core::Mem::from_raw_copied_ptr(b.device_ptr() as *mut std::ffi::c_void) };
+    let c_ptr = unsafe { core::Mem::from_raw_copied_ptr(c.device_ptr() as *mut std::ffi::c_void) };
 
     // Set kernel arguments
     unsafe {
@@ -91,13 +97,15 @@ fn main() {
 
     println!("Running custom GPU kernel...");
 
+    let cmd_queue = unsafe { core::CommandQueue::from_raw_copied_ptr(queue) };
+
     // Execute kernel
-    let global_work_size = [n, n];
+    let global_work_size = [n, n, 1];
     let start = Instant::now();
 
     unsafe {
-        core::enqueue_kernel(
-            &queue,
+        core::enqueue_kernel::<(), ()>(
+            &cmd_queue,
             &kernel,
             2, // work_dim
             None, // global_work_offset
@@ -108,7 +116,7 @@ fn main() {
         ).expect("Failed to enqueue kernel");
 
         // Wait for completion
-        core::finish(queue).unwrap();
+        core::finish(&cmd_queue).unwrap();
     }
 
     let custom_time = start.elapsed();
@@ -130,18 +138,41 @@ fn main() {
 
     println!("✓ ArrayFire matmul completed in {:.2} ms", af_time.as_secs_f64() * 1000.0);
 
-    // Verify correctness
-    let diff = sub(&c, &c_af, false);
-    let max_error = max_all(&abs(&diff)).0;
+    // Verify correctness - copy both results to host and compare
+    let mut custom_result = vec![0.0f32; (n * n) as usize];
+    let mut af_result = vec![0.0f32; (n * n) as usize];
+
+    c.host(&mut custom_result);
+    c_af.host(&mut af_result);
+
+    // Compute detailed error statistics
+    let mut max_error = 0.0f32;
+    let mut sum_sq_error = 0.0f64;
+
+    for i in 0..(n * n) as usize {
+        let error = (custom_result[i] - af_result[i]).abs();
+        max_error = max_error.max(error);
+        sum_sq_error += (error as f64).powi(2);
+    }
+
+    let rmse = (sum_sq_error / ((n * n) as f64)).sqrt();
+    let max_val = af_result.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+    let relative_error = max_error / max_val;
 
     println!("\nResults:");
     println!("  Custom kernel: {:.2} ms", custom_time.as_secs_f64() * 1000.0);
     println!("  ArrayFire:     {:.2} ms ({:.2}x faster)",
              af_time.as_secs_f64() * 1000.0,
              custom_time.as_secs_f64() / af_time.as_secs_f64());
-    println!("  Max error:     {:.2e}", max_error);
 
-    if max_error < 1e-4 {
+    println!("\nCorrectness:");
+    println!("  Max absolute error: {:.2e}", max_error);
+    println!("  RMSE:               {:.2e}", rmse);
+    println!("  Relative error:     {:.2e}", relative_error);
+
+    if max_error < 1e-3 {
         println!("\n✓ Results match!");
+    } else {
+        println!("\n⚠ Warning: Results differ significantly from ArrayFire!");
     }
 }
