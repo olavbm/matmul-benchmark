@@ -16,43 +16,7 @@ name = "matmul"
 path = "src/lib.rs"
 
 [[bench]]
-name = "naive_64"
-harness = false
-
-[[bench]]
-name = "naive_128"
-harness = false
-
-[[bench]]
-name = "blocked_64"
-harness = false
-
-[[bench]]
-name = "blocked_128"
-harness = false
-
-[[bench]]
-name = "simd_64"
-harness = false
-
-[[bench]]
-name = "simd_128"
-harness = false
-
-[[bench]]
-name = "nalgebra_64"
-harness = false
-
-[[bench]]
-name = "nalgebra_128"
-harness = false
-
-[[bench]]
-name = "simd_dotprod_128"
-harness = false
-
-[[bench]]
-name = "fma_dotprod_128"
+name = "matmul_1024"
 harness = false
 
 [dependencies]
